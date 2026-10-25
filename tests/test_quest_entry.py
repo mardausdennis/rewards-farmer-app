@@ -148,6 +148,7 @@ class QuestFixture(unittest.TestCase):
 		self.stack.enter_context(mock.patch.object(rewards_tasks.time, "monotonic", self.clock))
 		self.stack.enter_context(mock.patch.object(rewards_tasks.time, "sleep", self.clock.sleep))
 		self.stack.enter_context(mock.patch.object(rewards_tasks.mouse_trajectory, "MouseUtils", Mouse))
+		self.stack.enter_context(mock.patch.object(rewards_tasks.RewardsTaskUtils, "dismiss_cookie_consent", return_value=False))
 		self.stack.enter_context(mock.patch.dict(os.environ, {rewards_tasks.SKIP_TASKS_ENV: ""}))
 		self.emit = self.stack.enter_context(mock.patch.object(run_record, "emit"))
 

@@ -247,6 +247,19 @@ The port is published on `127.0.0.1` only, so it is not reachable from the netwo
 
 Signing in signs the browser in, not just the website, so Edge may sync bookmarks and autofill into the profile it just created. `data-dir` is a bot profile living in the project directory rather than your everyday browser profile, and it is gitignored, but it is worth knowing what ends up there.
 
+### Using a local LLM with Docker
+
+Point the base URL to the Docker host gateway. Example .env for Ollama Llama 3.2:
+```env
+QUERY_SOURCE=llm
+LLM_PROVIDER=local
+LOCAL_LLM_BASE_URL=http://host.docker.internal:11434/v1
+LOCAL_LLM_MODEL=llama3.2
+```
+
+If your model provider listens on localhost only, you must configure it to also listen on Docker's network bridge. Example for Ollama:
+`OLLAMA_HOST=0.0.0.0:11434 ollama serve`
+
 <details>
 <summary>Why sign-in has to happen inside the container</summary>
 
