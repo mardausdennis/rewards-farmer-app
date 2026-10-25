@@ -17,6 +17,7 @@ quest-steps-today.json
 !app/**/*.jpg
 !app/**/*.txt
 !tests/fixtures/*.txt
+!docs/images/*.png
 app/packaging/build/
 app/packaging/dist/
 /stats-ledger*
