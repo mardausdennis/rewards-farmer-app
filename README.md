@@ -1,4 +1,8 @@
-# User0332/rewards-farmer
+# rewards-farmer-app
+
+A Windows desktop app for [User0332/rewards-farmer](https://github.com/User0332/rewards-farmer). It adds setup, account status, run progress, history and settings, and a schedule that reads the Rewards page first and only runs when something is open. The farmer underneath is User0332's. The flags and run records the app needs are proposed upstream in [#132](https://github.com/User0332/rewards-farmer/pull/132), and fixes from his main get merged in here
+
+Report farmer bugs in [his issues](https://github.com/User0332/rewards-farmer/issues) and app bugs here. Everything below is the farmer's README with the app sections added. MIT licensed like the original, see [LICENSE](LICENSE)
 
 Automation for MS Rewards based on [https://youtu.be/4qdPcMNaioA](https://youtu.be/4qdPcMNaioA).
 
@@ -27,7 +31,7 @@ IMPORTANT: Use at your own risk. Microsoft may take action against your account 
 Paste this into PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/User0332/rewards-farmer/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/mardausdennis/rewards-farmer-app/main/install.ps1 | iex
 ```
 
 It downloads the code into `%LOCALAPPDATA%\rewards-farmer`, uses the newest installed Python 3.12 or newer supported by the Windows wheels in `poetry.lock` or installs Python 3.13 through winget if none qualifies, puts the dependencies in a `.venv` there and fetches the visual search image. Then it runs the configuration script described below, which also signs your accounts in, and asks whether to run the farmer every day at a time you pick. You can read [install.ps1](install.ps1) before running it.
@@ -45,8 +49,8 @@ Remove-Item "$([Environment]::GetFolderPath('Programs'))\Rewards Farmer.lnk"
 To set it up by hand instead, or on Linux and macOS, clone the repository.
 
 ```sh
-git clone https://github.com/User0332/rewards-farmer
-cd rewards-farmer
+git clone https://github.com/mardausdennis/rewards-farmer-app
+cd rewards-farmer-app
 ```
 
 ### Installing Dependencies
@@ -137,7 +141,7 @@ Close all webdriver browser instances. Run `main.py` again; the automation shoul
 
 The desktop app adds setup, account status, run progress, history and settings on Windows 10/11 x64. The CLI and Docker instructions above still work. Automation carries the same account risk
 
-When a desktop release is available, take `RewardsFarmer-<version>-windows-x64-Setup.exe` and its SHA256 file from the release page. Setup installs for the current user without admin access and adds a Start menu entry, not a desktop icon. Python and Git are not needed. Microsoft Edge is needed for automation; Setup offers Microsoft's official Evergreen WebView2 download only when that runtime is missing
+When a desktop release is available, take `RewardsFarmer-<version>-windows-x64-Setup.exe` and its SHA256 file from the [release page](https://github.com/mardausdennis/rewards-farmer-app/releases). Setup installs for the current user without admin access and adds a Start menu entry, not a desktop icon. Python and Git are not needed. Microsoft Edge is needed for automation; Setup offers Microsoft's official Evergreen WebView2 download only when that runtime is missing
 
 These builds are unsigned. Windows may show an unknown-publisher or SmartScreen warning, and managed machines may block them. Checksums verify the downloaded file, not a trusted publisher
 

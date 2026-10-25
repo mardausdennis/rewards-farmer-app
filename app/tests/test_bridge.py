@@ -116,7 +116,7 @@ class BridgeTests(unittest.TestCase):
 
 	def test_external_host_allowlist_and_bad_urls(self):
 		with patch.object(module.os, "startfile", create=True) as open_url:
-			for url in ("https://github.com/User0332/rewards-farmer", "https://rewards.bing.com/", "https://account.microsoft.com/"):
+			for url in ("https://github.com/mardausdennis/rewards-farmer-app", "https://rewards.bing.com/", "https://account.microsoft.com/"):
 				self.assertTrue(self.api.open_external({"url": url})["ok"])
 			for url in ("file:///C:/windows", "http://github.com/", "https://github.com.evil.test/", "https://user@github.com/", "https://github.com:123/", "https://github.com/\nanything"):
 				self.assertEqual(self.api.open_external({"url": url})["error"]["code"], "url_not_allowed")

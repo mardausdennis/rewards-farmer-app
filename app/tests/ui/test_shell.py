@@ -475,7 +475,7 @@ class ShellTests(unittest.TestCase):
 			let opened=null, dismissed=0;
 			window.pywebview.api.open_external=async request=>{opened=request.url;return {ok:true,data:{}};};
 			window.pywebview.api.dismiss_update=async request=>{assert(request.version==='0.2.0','dismiss exact version');dismissed++;return {ok:true,data:{}};};
-			const update={available:true,latest:'0.2.0',url:'https://github.com/User0332/rewards-farmer/releases/tag/v0.2.0'};
+			const update={available:true,latest:'0.2.0',url:'https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0'};
 			window.rf.receive([{topic:'update.available',data:update}]);
 			const region=document.getElementById('app-notices');
 			assert(region.querySelector('.banner') && region.getBoundingClientRect().height>0,'visible shared update banner');
@@ -680,7 +680,7 @@ class ShellTests(unittest.TestCase):
 		self.assertEqual([], _harness.errors())
 
 	def test_canonical_update_available_topic(self):
-		self.js("const update={available:true,latest:'0.2.1',url:'https://github.com/User0332/rewards-farmer/releases/tag/v0.2.1'};window.rf.receive([{topic:'update.available',data:update}]);assert(s.get('update').latest==='0.2.1' && document.querySelector('#app-notices .banner'),'canonical update.available');")
+		self.js("const update={available:true,latest:'0.2.1',url:'https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.1'};window.rf.receive([{topic:'update.available',data:update}]);assert(s.get('update').latest==='0.2.1' && document.querySelector('#app-notices .banner'),'canonical update.available');")
 		self.assertEqual([], _harness.errors())
 
 	def test_goal_presets_custom_and_clear_use_set_goal(self):

@@ -29,12 +29,14 @@ class UpdateTests(unittest.TestCase):
 		self.get = self.http.start()
 		self.addCleanup(self.http.stop)
 		self.get.return_value = Mock(status_code=200)
-		self.get.return_value.json.return_value = {"tag_name": "v0.2.0", "html_url": "https://github.com/User0332/rewards-farmer/releases/tag/v0.2.0", "draft": False, "prerelease": False}
+		self.get.return_value.json.return_value = {"tag_name": "v0.2.0", "html_url": "https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0", "draft": False, "prerelease": False}
 
 	def test_new_release_and_headers(self):
 		result = self.module.check()
 		self.assertTrue(result["available"])
 		self.assertEqual(result["latest"], "0.2.0")
+		self.assertEqual(result["url"], "https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0")
+		self.assertEqual(self.get.call_args.args, ("https://api.github.com/repos/mardausdennis/rewards-farmer-app/releases/latest",))
 		self.assertEqual(self.get.call_args.kwargs["timeout"], 10)
 		self.assertEqual(self.get.call_args.kwargs["headers"]["Accept"], "application/vnd.github+json")
 		self.assertNotIn("Authorization", self.get.call_args.kwargs["headers"])
@@ -83,9 +85,17 @@ class UpdateTests(unittest.TestCase):
 		self.assertEqual(self.get.call_count, 1)
 
 	def test_untrusted_release_page_fails_closed(self):
-		self.get.return_value.json.return_value["html_url"] = "https://github.com/attacker/project/releases/tag/v0.2.0"
-		with self.assertRaises(self.module.UpdateError):
-			self.module.check()
+		for url in (
+			"https://github.com/attacker/project/releases/tag/v0.2.0",
+			"https://github.com/User0332/rewards-farmer/releases/tag/v0.2.0",
+			"http://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0",
+			"https://github.com.evil.test/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0",
+			"https://github.com/mardausdennis/rewards-farmer-app-other/releases/tag/v0.2.0",
+		):
+			with self.subTest(url=url):
+				self.get.return_value.json.return_value["html_url"] = url
+				with self.assertRaises(self.module.UpdateError):
+					self.module.check(force=True)
 
 	def test_blocked_bridge_update_allows_goal_and_settings_without_lost_fields(self):
 		from rfapp.bridge import Bridge

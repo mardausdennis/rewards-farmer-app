@@ -1,7 +1,7 @@
 <#
 Installs rewards-farmer on Windows, or updates an install made with it.
 
-	irm https://raw.githubusercontent.com/User0332/rewards-farmer/main/install.ps1 | iex
+	irm https://raw.githubusercontent.com/mardausdennis/rewards-farmer-app/main/install.ps1 | iex
 
 Everything goes into one folder, %LOCALAPPDATA%\rewards-farmer unless
 REWARDS_FARMER_HOME names another one. Started from a clone, it sets up that
@@ -18,7 +18,7 @@ param(
 	[string]$InstallDir = $(if ($env:REWARDS_FARMER_HOME) { $env:REWARDS_FARMER_HOME } else { Join-Path $env:LOCALAPPDATA "rewards-farmer" }),
 
 	# What to download, for trying a fork or a branch before it is merged.
-	[string]$Repo = "User0332/rewards-farmer",
+	[string]$Repo = "mardausdennis/rewards-farmer-app",
 	[string]$Branch = "main",
 
 	# A time such as 09:30 sets up the daily run without asking.

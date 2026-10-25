@@ -9,7 +9,7 @@ import requests
 from rfapp import __version__
 from rfapp import prefs
 
-UPDATE_REPO = "User0332/rewards-farmer"
+UPDATE_REPO = "mardausdennis/rewards-farmer-app"
 _lock = threading.RLock()
 _cached = None
 _log = logging.getLogger("rfapp.updates")

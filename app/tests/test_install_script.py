@@ -93,6 +93,23 @@ def lock_text(packages):
 	)
 
 
+class InstallerRepositoryTests(unittest.TestCase):
+	def test_default_download_uses_the_app_repository_and_main(self):
+		text = (ROOT / "install.ps1").read_text(encoding="utf-8")
+		self.assertIn('[string]$Repo = "mardausdennis/rewards-farmer-app"', text)
+		self.assertIn('[string]$Branch = "main"', text)
+		self.assertIn("https://raw.githubusercontent.com/mardausdennis/rewards-farmer-app/main/install.ps1", text)
+		self.assertIn('"https://github.com/$FromRepo/archive/refs/heads/$FromBranch.zip"', text)
+		self.assertIn("Get-Code $root $Repo $Branch", text)
+		self.assertNotIn("User0332/rewards-farmer", text)
+
+	def test_image_uses_the_downloaded_helper_not_an_upstream_raw_file(self):
+		text = (ROOT / "install.ps1").read_text(encoding="utf-8")
+		self.assertIn('& $venvPython (Join-Path $root "src\\random_image_for_visual_search.py")', text)
+		self.assertTrue((ROOT / "src/random_image_for_visual_search.py").is_file())
+		self.assertIn('API_URL = "https://commons.wikimedia.org/w/api.php"', (ROOT / "src/random_image_for_visual_search.py").read_text(encoding="utf-8"))
+
+
 @unittest.skipUnless(shutil.which("powershell.exe"), "Windows PowerShell is unavailable; installer function tests require its parser")
 class InstallScriptTests(unittest.TestCase):
 	def setUp(self):
