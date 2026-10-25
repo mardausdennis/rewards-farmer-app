@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -171,6 +172,30 @@ class PackagingTests(unittest.TestCase):
 		self.assertIn('app_data(root)', text)
 		self.assertIn('third-party/', text)
 		self.assertIn('str(root / "app"), str(root / "src")', text)
+
+	def test_spec_filters_install_records_after_analysis_and_keeps_metadata(self):
+		tree = ast.parse((PACKAGING / "RewardsFarmer.spec").read_text(encoding="utf-8"))
+		filters = [(index, node) for index, node in enumerate(tree.body) if isinstance(node, ast.Assign) and any(
+			isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+			and target.value.id == "a" and target.attr == "datas" for target in node.targets)]
+		self.assertEqual(len(filters), 1, "Filter the final Analysis datas before COLLECT")
+		analysis = next(index for index, node in enumerate(tree.body) if isinstance(node, ast.Assign)
+			and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name) and node.value.func.id == "Analysis")
+		collect = next(index for index, node in enumerate(tree.body) if isinstance(node, ast.Assign)
+			and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name) and node.value.func.id == "COLLECT")
+		self.assertLess(analysis, filters[0][0])
+		self.assertLess(filters[0][0], collect)
+		records = [(name, "/synthetic/RECORD", "DATA") for name in (
+			"numpy-2.5.1.dist-info/RECORD", "pystray-0.19.5.dist-info\\RECORD",
+			"attrs-26.1.0.dist-info/RECORD", "trio-0.33.0.dist-info/record")]
+		retained = [(name, "/synthetic/metadata", "DATA") for name in (
+			"numpy-2.5.1.dist-info/METADATA", "pystray-0.19.5.dist-info/METADATA",
+			"numpy-2.5.1.dist-info/WHEEL", "pystray-0.19.5.dist-info/entry_points.txt",
+			"numpy-2.5.1.dist-info/licenses/LICENSE.txt", "package/RECORD",
+			"package.dist-info/subdirectory/RECORD")]
+		namespace = {"a": SimpleNamespace(datas=records + retained), "windows_only": load_layout().windows_only}
+		exec(compile(ast.Module(body=[filters[0][1]], type_ignores=[]), "<spec-datas-filter>", "exec"), namespace)
+		self.assertEqual(namespace["a"].datas, retained)
 
 	def test_installer_settings_and_version_input(self):
 		text = (PACKAGING / "RewardsFarmer.iss").read_text(encoding="utf-8")

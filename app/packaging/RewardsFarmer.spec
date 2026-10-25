@@ -26,7 +26,9 @@ a = Analysis(
 	hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=list(EXCLUDES),
 	noarchive=False, optimize=0, module_collection_mode={"pystray": "py"},
 )
-a.datas = windows_only(a.datas, toc=True)
+# RECORD contains installation paths, not runtime metadata.
+a.datas = [entry for entry in windows_only(a.datas, toc=True)
+	if not entry[0].replace("\\", "/").lower().endswith(".dist-info/record")]
 a.binaries = windows_only(a.binaries, toc=True)
 pyz = PYZ(a.pure)
 exe = EXE(
