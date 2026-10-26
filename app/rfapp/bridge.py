@@ -540,6 +540,38 @@ class Bridge:
 	def list_accounts(self, request):
 		return self._module("accounts_admin").list_accounts()
 
+	@_method()
+	def get_invited_friends(self, request):
+		return {"invited_friends": self._module("prefs").invited_friends()}
+
+	@_method(required=("name", "email"), optional=("id",))
+	def save_invited_friend(self, request):
+		if "id" in request and request["id"] is None:
+			raise _BridgeError("bad_request")
+		try:
+			with self._settings_lock:
+				return {"friend": self._module("prefs").save_invited_friend(request["name"], request["email"], request.get("id"))}
+		except OSError as exc:
+			raise _BridgeError("internal", detail=type(exc).__name__) from None
+
+	@_method(required=("id",))
+	def remove_invited_friend(self, request):
+		try:
+			with self._settings_lock:
+				return {"invited_friends": self._module("prefs").remove_invited_friend(request["id"])}
+		except OSError as exc:
+			raise _BridgeError("internal", detail=type(exc).__name__) from None
+
+	@_method(optional=("account_id",))
+	def get_referral_info(self, request):
+		if "account_id" in request:
+			account_id = self._known_account(request["account_id"])
+		else:
+			accounts = self._accounts()
+			account_id = next((account["id"] for account in accounts if not account.get("paused")), accounts[0]["id"] if accounts else None)
+		backend = self._dependencies.get("referrals") or importlib.import_module("referrals")
+		return backend.get_referral_info(account_id, directory=paths.data_home())
+
 	@_method(required=("account_id",))
 	def get_account_picture(self, request):
 		account_id = self._known_account(request["account_id"])

@@ -1,5 +1,6 @@
 import { el } from "../dom.js";
 import { activeStates, statusKeys, signinFlow } from "./accounts/signin.js";
+import { invitations } from "./accounts/invitations.js";
 
 export async function mount(view, ctx) {
     const { bridge, i18n, store, router, components: c } = ctx;
@@ -17,6 +18,7 @@ export async function mount(view, ctx) {
     const root = el("section", { class: "screen accounts-screen", "data-screen": "accounts" });
     view.append(root);
     const flow = signinFlow(ctx, { accepts: (id) => accounts.some((a) => a.id === id), changed: render, connected: refresh });
+    const invited = invitations(ctx, render);
     const button = (id, props) => { const node = c.button.create(props); node.id = id; return node; };
     const keyId = (account) => encodeURIComponent(account.id);
     function disclosure(labelKey, children, id, open = false) {
@@ -31,10 +33,12 @@ export async function mount(view, ctx) {
         store.set("appInfo", { ...store.get("appInfo"), has_accounts: next.length > 0 });
     }
     async function refresh() {
+        const invitationLoad = invited.load();
         try {
             const data = await bridge.call("list_accounts");
             if (alive) { sync(data.accounts); loaded = true; }
         } catch (err) { if (alive) error = err; }
+        await invitationLoad;
         render();
     }
     async function action(account, method, request, successKey) {
@@ -136,7 +140,8 @@ export async function mount(view, ctx) {
         if (panel) root.append(panel);
         if (!loaded && error) root.append(c.emptyState.create({ titleKey: "accounts.load.title", action: { labelKey: "common.action.retry", onClick: () => { error = null; refresh(); } } }));
         else if (!accounts.length) root.append(c.emptyState.create({ icon: "accounts", titleKey: "accounts.empty.title", bodyKey: "accounts.empty.body", action: { labelKey: "accounts.empty.action", variant: "primary", onClick: () => router.navigate("#/setup/1") } }));
-        else root.append(el("div", { class: "accounts-list" }, [...accounts.map(accountEntry), disclosure("accounts.action.add_another", [el("p", { id: "accounts-add-reason", text: t("errors.app.accounts_add_unsupported") }), button("accounts-add-another", { labelKey: "accounts.action.add_another", disabled: true })])]));
+        else root.append(el("div", { class: "accounts-list" }, [...accounts.map(accountEntry), ...invited.listItems(), disclosure("accounts.action.add_another", [el("p", { id: "accounts-add-reason", text: t("errors.app.accounts_add_unsupported") }), button("accounts-add-another", { labelKey: "accounts.action.add_another", disabled: true })])]));
+        if (accounts.length) root.append(invited.referralSection());
         root.querySelector("#accounts-add-another")?.setAttribute("aria-describedby", "accounts-add-reason");
         const nextFocus = document.getElementById(focusId || focused);
         if (nextFocus && !nextFocus.disabled) nextFocus.focus({ preventScroll: true });
@@ -146,5 +151,5 @@ export async function mount(view, ctx) {
     flow.seed();
     const activeId = store.get("overview")?.signin_active?.account_id;
     if (activeId && !flow.status) await flow.restore(activeId);
-    return { update() { render(); }, unmount() { alive = false; flow.dispose(); c.dispose(root); } };
+    return { update() { render(); }, unmount() { alive = false; flow.dispose(); invited.dispose(); c.dispose(root); } };
 }

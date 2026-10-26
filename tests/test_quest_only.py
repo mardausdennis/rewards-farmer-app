@@ -89,6 +89,7 @@ def record_run(home, plan=None, *, state_changes=None, gain=0, skipped="", quest
 		changes = state_changes(driver.account_name) if callable(state_changes) else state_changes
 		return replace(state, **changes) if changes else state
 	with contextlib.ExitStack() as stack:
+		stack.enter_context(mock.patch.object(main, "_record_referrals"))
 		stack.enter_context(mock.patch.dict(os.environ, {"REWARDS_FARMER_DATA_HOME": str(home), "USER_DATA_DIR": str(profiles),
 			"REWARDS_ACCOUNTS": ",".join(names), rewards_tasks.SKIP_TASKS_ENV: skipped, run_record.RUN_ID_ENV: "20261022T100000Z-0084"}))
 		stack.enter_context(mock.patch.object(constants, "DATA_HOME", str(home)))

@@ -4,8 +4,11 @@ import copy
 import json
 import logging
 import os
+import re
+import secrets
 import tempfile
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from file_replace import read_file, replace_file
@@ -22,6 +25,7 @@ _DEFAULTS = {
 	"setup_done": False,
 	"tray_hint_shown": False,
 	"account_labels": {},
+	"invited_friends": [],
 	"goals": {},
 	"window": {"width": 1100, "height": 760, "x": None, "y": None, "maximized": False},
 	"last_route": "#/overview",
@@ -44,6 +48,75 @@ def load() -> dict:
 		return values
 	values.update(stored)
 	return values
+
+
+class FriendNotesError(ValueError):
+	code = "bad_request"
+
+
+def _friend_text(value, limit, *, email=False):
+	if not isinstance(value, str):
+		raise FriendNotesError("bad_request")
+	value = value.strip()
+	if not 1 <= len(value) <= limit or any(ord(char) < 32 or 127 <= ord(char) < 160 for char in value):
+		raise FriendNotesError("bad_request")
+	if email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+		raise FriendNotesError("bad_request")
+	return value
+
+
+def _friend_id(value):
+	if not isinstance(value, str) or not re.fullmatch(r"friend-[0-9a-f]{32}", value):
+		raise FriendNotesError("bad_request")
+	return value
+
+
+def invited_friends() -> list[dict]:
+	stored = load().get("invited_friends", [])
+	if not isinstance(stored, list):
+		return []
+	result, seen = [], set()
+	for item in stored:
+		try:
+			if not isinstance(item, dict):
+				continue
+			identity = _friend_id(item.get("id"))
+			added_at = item.get("added_at")
+			if identity in seen or not isinstance(added_at, str) or datetime.fromisoformat(added_at.replace("Z", "+00:00")).tzinfo is None:
+				continue
+			result.append({"id": identity, "name": _friend_text(item.get("name"), 40), "email": _friend_text(item.get("email"), 254, email=True), "added_at": added_at})
+			seen.add(identity)
+		except ValueError:
+			continue
+	return result
+
+
+def save_invited_friend(name, email, identity=None) -> dict:
+	name, email = _friend_text(name, 40), _friend_text(email, 254, email=True)
+	with _lock:
+		friends = invited_friends()
+		if identity is None:
+			friend = {"id": "friend-" + secrets.token_hex(16), "name": name, "email": email, "added_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")}
+			friends.append(friend)
+		else:
+			identity = _friend_id(identity)
+			friend = next((item for item in friends if item["id"] == identity), None)
+			if friend is None:
+				raise FriendNotesError("bad_request")
+			friend.update(name=name, email=email)
+		save({"invited_friends": friends})
+		return dict(friend)
+
+
+def remove_invited_friend(identity) -> list[dict]:
+	identity = _friend_id(identity)
+	with _lock:
+		friends = invited_friends()
+		if not any(item["id"] == identity for item in friends):
+			raise FriendNotesError("bad_request")
+		friends = [item for item in friends if item["id"] != identity]
+		save({"invited_friends": friends})
+		return friends
 
 
 def save(changes: dict) -> dict:

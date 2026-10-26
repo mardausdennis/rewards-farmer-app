@@ -16,6 +16,7 @@ import browser
 import desktop_utils
 import rewards_tasks
 import rewards_state
+import referrals
 import element_selectors
 import run_record
 import run_lock
@@ -85,6 +86,23 @@ def _watch_stop(path, done):
 			return
 
 
+def _record_referrals(driver, account):
+	try:
+		state = referrals.read_referral_page(driver)
+	except Exception:
+		state = referrals.ReferralState(unreadable="read_failed")
+	read_at = run_record._timestamp()
+	recorder = run_record.current()
+	account_id = "@root" if account.is_default else account.name
+	try:
+		referrals.save_referral_state(account_id, state, read_at=read_at, run_id=recorder.run_id if recorder else None)
+	except Exception:
+		state = dataclasses.replace(state, unreadable="storage_failed")
+	# The correlated run event deliberately never carries the link or exception text.
+	run_record.emit("referral_state", account=account.name, account_id=account_id, read_at=read_at, link_found=state.link_found,
+		referrals=state.referrals, friends=None if state.friends is None else len(state.friends), unreadable=state.unreadable)
+
+
 def run_account(account: accounts.Account) -> bool:
 	"""Work one account. Returns whether the browser started."""
 	global _account_started, _account_ran
@@ -140,6 +158,7 @@ def run_account(account: accounts.Account) -> bool:
 			driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {"headers": {}})
 			state = rewards_state.read_state(driver, rewards.elements, skip_cards=run_record.cards_left_open_today(account.name), phase="after")
 			run_record.emit("state", phase="after", **dataclasses.asdict(state))
+			_record_referrals(driver, account)
 		ended()
 	except KeyboardInterrupt:
 		ended()

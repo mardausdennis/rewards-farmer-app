@@ -41,7 +41,8 @@ class BridgeTests(unittest.TestCase):
 		self.signin = {"account_id": "account-1", "state": "waiting", "at": "2026-10-14T18:00:00Z"}
 		self.data = {"run_id": RUN_ID, "active": True, "accounts": []}
 		self.deps = {
-			"prefs": SimpleNamespace(load=lambda: dict(self.p), save=lambda changes: self.p.update(changes)),
+			"prefs": SimpleNamespace(load=lambda: dict(self.p), save=lambda changes: self.p.update(changes), invited_friends=lambda: []),
+			"referrals": SimpleNamespace(get_referral_info=Mock(return_value={"link": None, "link_found": False, "referrals": None, "friends": None, "read_at": None, "unreadable": "not_read"})),
 			"i18n": SimpleNamespace(resolve=lambda *args: ("en", "ltr", "en-US"), current=lambda: SimpleNamespace(t=lambda key, **params: key), reload=Mock()),
 			"settings": SimpleNamespace(load=Mock(return_value={}), validate=Mock(return_value={}), save=Mock(return_value={"values": {}, "schedule": {}, "warnings": []}), user_data_dir=lambda: self.home / "profiles"),
 			"runs": SimpleNamespace(load_run=Mock(return_value=self.data), active_run_id=Mock(return_value=RUN_ID), history=Mock(return_value={"runs": [], "next_before": None}), overview=Mock(return_value={"accounts": [{"account_id": "account-1", "goal": {"target": 100}}]})),
@@ -62,7 +63,7 @@ class BridgeTests(unittest.TestCase):
 		self.addCleanup(self.api._close)
 
 	def test_exact_methods_one_object_and_no_public_state(self):
-		expected = {"ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "cancel_signin", "rename_account", "set_account_paused", "remove_account"}
+		expected = {"ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_invited_friends", "save_invited_friend", "remove_invited_friend", "get_referral_info", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "cancel_signin", "rename_account", "set_account_paused", "remove_account"}
 		public = {name for name in dir(self.api) if not name.startswith("_")}
 		self.assertEqual(public, expected)
 		for name in public:

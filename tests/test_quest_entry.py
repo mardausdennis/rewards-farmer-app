@@ -175,6 +175,7 @@ class QuestEntryTests(QuestFixture):
 		driver.home_at = -100
 		reader = rewards_state.read_state
 		with contextlib.ExitStack() as stack:
+			stack.enter_context(mock.patch.object(main, "_record_referrals"))
 			stack.enter_context(mock.patch.object(main, "_plan", main.RunPlan(read_state=True, only_if_open=True, min_points=15)))
 			stack.enter_context(mock.patch.object(main, "_account_started", False))
 			stack.enter_context(mock.patch.object(main, "_account_ran", False))

@@ -3,6 +3,25 @@
 .accounts-help { color: var(--c-text-2); max-inline-size: 70ch; }
 .accounts-list { border-block-start: 1px solid var(--c-border); }
 .accounts-entry { min-inline-size: 0; }
+.accounts-invited-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); padding-block-start: var(--sp-4); }
+.accounts-invited-heading h2, .accounts-referrals h2 { font-size: var(--fs-4); font-weight: var(--fw-medium); }
+.accounts-invited-empty { color: var(--c-text-2); padding-block: var(--sp-3); }
+.accounts-invited-chip { display: inline-block; margin-block-start: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--r-pill); background: var(--c-surface-2); }
+.accounts-friend .control-actions { min-inline-size: 0; }
+.accounts-friend-switch { min-inline-size: 0; max-inline-size: 340px; }
+.accounts-friend-switch .switch-copy { overflow-wrap: anywhere; }
+.accounts-friend-switch .field-label { font-size: var(--fs-2); }
+.accounts-friend-switch .field-description { font-size: var(--fs-1); }
+.accounts-friend-editor .control-actions { padding-inline-start: 0; }
+.accounts-referrals { display: grid; gap: var(--sp-3); border-block-start: 1px solid var(--c-border); padding-block-start: var(--sp-4); min-inline-size: 0; overflow-wrap: anywhere; }
+.accounts-referral-copy { display: flex; align-items: end; flex-wrap: wrap; gap: var(--sp-3); min-inline-size: 0; }
+.accounts-referral-copy .field { flex: 1 1 260px; min-inline-size: 0; }
+.accounts-referral-copy .button { max-inline-size: 100%; }
+.accounts-referral-feedback:empty { display: none; }
+.accounts-referral-figures { display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-7); }
+.accounts-referral-figures > div { min-inline-size: 0; }
+.accounts-referral-figures dt, .accounts-referral-read, .accounts-referral-status, .accounts-referral-unavailable { color: var(--c-text-2); font-size: var(--fs-2); }
+.accounts-referral-figures dd { margin-inline-start: 0; font-size: var(--fs-4); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
 .accounts-help { padding-block: var(--sp-3); font-size: var(--fs-2); }
 .accounts-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); padding: var(--sp-4); margin-block-end: var(--sp-4); background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-s); }
 .accounts-editor .field { max-inline-size: 440px; }

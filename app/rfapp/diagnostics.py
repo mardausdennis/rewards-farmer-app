@@ -163,7 +163,9 @@ def export(path):
 			if log.is_file() and not log.is_symlink():
 				members[log.name] = log.read_text(encoding="utf-8", errors="replace")
 		if paths.prefs_path().is_file() and not paths.prefs_path().is_symlink():
-			members["app-prefs.json"] = read_file(paths.prefs_path())
+			public_prefs = json.loads(read_file(paths.prefs_path()))
+			public_prefs.pop("invited_friends", None)
+			members["app-prefs.json"] = json.dumps(public_prefs, ensure_ascii=False)
 		if env_text is not None:
 			members[".env"] = env_text
 		members["schedule.xml"] = xml

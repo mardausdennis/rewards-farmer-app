@@ -36,6 +36,10 @@ SUCCESS_KEYS = {
 	"import_legacy_install": {"accounts"},
 	"complete_setup": set(),
 	"list_accounts": {"accounts"},
+	"get_invited_friends": {"invited_friends"},
+	"save_invited_friend": {"friend"},
+	"remove_invited_friend": {"invited_friends"},
+	"get_referral_info": {"link", "link_found", "referrals", "friends", "read_at", "unreadable"},
 	"get_account_picture": {"account_id", "rev", "data_url"},
 	"add_account": {"account_id", "signin"},
 	"sign_in_again": {"signin"},
@@ -398,6 +402,32 @@ def validate_deferred_records(mock_root):
 
 
 class MockShapeTests(unittest.TestCase):
+	def test_f103_invitation_shapes_match_real_producers(self):
+		import os
+		from rfapp import prefs
+		import referrals
+		with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {"REWARDS_FARMER_DATA_HOME": folder}):
+			friend = prefs.save_invited_friend("Synthetic Friend", "friend@example.invalid")
+			info = referrals.get_referral_info(None, directory=folder)
+			fixture = json.loads((MOCK_ROOT / "accounts/invitations.json").read_text(encoding="utf-8"))["methods"]
+			self.assertEqual(set(friend), set(fixture["save_invited_friend"]["data"]["friend"]))
+			self.assertEqual(set(info), set(fixture["get_referral_info"]["data"]))
+			for path in (MOCK_ROOT / "accounts").glob("invitations*.json"):
+				methods = json.loads(path.read_text(encoding="utf-8"))["methods"]
+				for name in ("get_invited_friends", "save_invited_friend", "remove_invited_friend"):
+					if name not in methods: continue
+					data = methods[name]["data"]
+					items = [data["friend"]] if name == "save_invited_friend" else data["invited_friends"]
+					for item in items:
+						self.assertEqual(set(item), set(friend))
+						self.assertRegex(item["id"], r"^friend-[0-9a-f]{32}$")
+				if "get_referral_info" in methods:
+					data = methods["get_referral_info"]["data"]
+					self.assertEqual(set(data), set(info))
+					self.assertIsNone(data["referrals"])
+					self.assertIsNone(data["friends"])
+					self.assertIs(type(data["link_found"]), bool)
+
 	def test_f78_overview_streaks_shapes(self):
 		checked = 0
 		for path in sorted(MOCK_ROOT.rglob("*.json")):

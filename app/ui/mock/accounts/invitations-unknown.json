@@ -1,0 +1,10 @@
+{
+  "synthetic": true,
+  "methods": {
+    "get_invited_friends": {"ok": true, "data": {"invited_friends": []}},
+    "save_invited_friend": {"ok": true, "data": {"friend": {"id": "friend-00000000000000000000000000000001", "name": "Synthetic Friend", "email": "friend@example.invalid", "added_at": "2026-10-25T22:00:00Z"}}},
+    "remove_invited_friend": {"ok": true, "data": {"invited_friends": []}},
+    "get_referral_info": {"ok": true, "data": {"link": null, "link_found": false, "referrals": null, "friends": null, "read_at": null, "unreadable": "not_read"}}
+  },
+  "pushes": []
+}

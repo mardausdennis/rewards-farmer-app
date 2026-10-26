@@ -158,6 +158,7 @@ class MainRecordTests(unittest.TestCase):
 		self.factory = self.stack.enter_context(mock.patch.object(main.rewards_tasks, "RewardsTaskUtils", return_value=self.tasks))
 		self.state = rewards_state.RewardsState(balance=100, searches_earned=0, searches_max=60, open_points=60)
 		self.reader = self.stack.enter_context(mock.patch.object(rewards_state, "read_state", return_value=self.state))
+		self.stack.enter_context(mock.patch.object(main, "_record_referrals"))
 		old = logging.root.manager.disable
 		logging.disable(logging.CRITICAL)
 		self.addCleanup(logging.disable, old)

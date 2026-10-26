@@ -1,4 +1,4 @@
-const methodNames = ["ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "cancel_signin", "rename_account", "set_account_paused", "remove_account"];
+const methodNames = ["ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_invited_friends", "save_invited_friend", "remove_invited_friend", "get_referral_info", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "cancel_signin", "rename_account", "set_account_paused", "remove_account"];
 const failure = (method) => ({ ok: false, error: { code: "internal", message_key: "errors.app.internal", params: {}, detail: `Mock method ${method} has no matching response`, fields: null } });
 
 function jsonEqual(first, second) {
@@ -34,11 +34,37 @@ export async function install() {
         return response.json();
     };
     const [defaults, chosen] = await Promise.all([load("shell/defaults.json"), load(`${fixture}.json`)]);
-    const methods = { ...defaults.methods, ...chosen.methods };
+    const methods = {
+        get_invited_friends: { ok: true, data: { invited_friends: [] } },
+        get_referral_info: { ok: true, data: { link: null, link_found: false, referrals: null, friends: null, read_at: null, unreadable: "not_read" } },
+        ...defaults.methods, ...chosen.methods,
+    };
     const timers = new Set();
+    let invitedFriends = resolveEnvelope("get_invited_friends", methods.get_invited_friends, {}).data?.invited_friends || [];
     let pushesStarted = false;
     const api = Object.fromEntries(methodNames.map((method) => [method, async (request = {}) => {
-        const response = resolveEnvelope(method, methods[method], request);
+        let response = resolveEnvelope(method, methods[method], request);
+        if (method === "get_invited_friends" && response.ok) response.data.invited_friends = structuredClone(invitedFriends);
+        if (method === "save_invited_friend" && response.ok) {
+            const valid = typeof request.name === "string" && request.name.trim().length >= 1 && request.name.trim().length <= 40 &&
+                typeof request.email === "string" && request.email.trim().length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(request.email.trim()) &&
+                !/[\u0000-\u001f\u007f-\u009f]/.test(request.name + request.email) &&
+                (!Object.hasOwn(request, "id") || invitedFriends.some((friend) => friend.id === request.id));
+            if (!valid) response = { ok: false, error: { code: "bad_request", message_key: "errors.app.bad_request", params: {}, detail: null, fields: null } };
+            else {
+                const friend = request.id ? { ...invitedFriends.find((item) => item.id === request.id) } : { ...response.data.friend, id: `friend-${crypto.randomUUID().replaceAll("-", "")}` };
+                Object.assign(friend, { name: request.name.trim(), email: request.email.trim() });
+                invitedFriends = request.id ? invitedFriends.map((item) => item.id === request.id ? friend : item) : [...invitedFriends, friend];
+                response = { ok: true, data: { friend: structuredClone(friend) } };
+            }
+        }
+        if (method === "remove_invited_friend" && response.ok) {
+            if (!invitedFriends.some((friend) => friend.id === request.id)) response = { ok: false, error: { code: "bad_request", message_key: "errors.app.bad_request", params: {}, detail: null, fields: null } };
+            else {
+                invitedFriends = invitedFriends.filter((friend) => friend.id !== request.id);
+                response.data.invited_friends = structuredClone(invitedFriends);
+            }
+        }
         if (method === "app_info" && response.ok) {
             const theme = query.get("theme");
             if (["dark", "light"].includes(theme)) response.data.theme = theme;

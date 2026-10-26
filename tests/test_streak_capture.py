@@ -208,6 +208,7 @@ class CaptureTests(unittest.TestCase):
 		tasks = types.SimpleNamespace(elements=ElementSelectionUtils(driver), complete_all_tasks=tasks_done)
 		account = accounts.Account(name="sample", user_data_dir=os.path.join(self.tmp.name, "profiles", "sample"), profile_name="Default")
 		with run_record.account_context("sample"), mock.patch.object(main, "_plan", main.RunPlan(read_state=True)), \
+			mock.patch.object(main, "_record_referrals"), \
 			mock.patch.object(main.browser, "start_driver", return_value=driver), \
 			mock.patch.object(main.desktop_utils, "prepare_desktop_before_launch", return_value=True), \
 			mock.patch.object(main.desktop_utils, "switch_back_after_launch"), \

@@ -182,6 +182,7 @@ class QuestCountTests(fixture.QuestFixture):
 	def test_real_account_run_then_same_day_check_does_not_start_another_task(self):
 		def run(driver):
 			with contextlib.ExitStack() as stack:
+				stack.enter_context(mock.patch.object(main, "_record_referrals"))
 				stack.enter_context(mock.patch.object(main, "_plan", main.RunPlan(read_state=True, only_if_open=True, min_points=15)))
 				stack.enter_context(mock.patch.object(main, "_account_started", False))
 				stack.enter_context(mock.patch.object(main, "_account_ran", False))

@@ -39,7 +39,8 @@ class SourceTests(unittest.TestCase):
 		for key, entry in catalog["messages"].items():
 			self.assertTrue(entry["note"].strip(), key)
 			self.assertNotRegex(json.dumps(entry, ensure_ascii=False), "[\u2013\u2014]")
-		self.assertEqual(14, len(FIXTURES))
+		self.assertEqual(16, len(FIXTURES))
+		self.assertTrue({"invitations", "invitations-unknown"}.issubset(FIXTURES))
 		for fixture in FIXTURES:
 			data = json.loads((UI_DIR / "mock/accounts" / (fixture + ".json")).read_text(encoding="utf-8"))
 			self.assertTrue(data["synthetic"])
@@ -53,6 +54,18 @@ class SourceTests(unittest.TestCase):
 		self.assertNotRegex(text, "[\u2013\u2014]")
 		css = (UI_DIR / "css/screens/accounts.css").read_text(encoding="utf-8")
 		self.assertNotRegex(css, r"(?m)(?:^|[;{])\s*(?:width|height|left|right|top|bottom|margin-left|padding-right)\s*:")
+
+	def test_f104_invitation_catalog_and_screen_boundary(self):
+		catalog=json.loads((UI_DIR/"i18n/en/accounts.json").read_text(encoding="utf-8"))["messages"]
+		codes=("not_read","signed_out","challenge","page_unknown","link_missing","link_ambiguous","link_invalid","read_failed","storage_failed","storage_unreadable")
+		for code in codes:self.assertIn("accounts.referrals.unreadable."+code,catalog)
+		text=(UI_DIR/"js/screens/accounts/invitations.js").read_text(encoding="utf-8")
+		self.assertIn("c.accountRow.create",text);self.assertIn("c.switchControl.create",text);self.assertIn("c.textField.create",text)
+		self.assertNotIn('el("input"',text);self.assertNotIn("store.set",text)
+		for method in ("add_account","sign_in_again","set_account_paused","remove_account","start_run","stop_run","get_account_picture"):
+			self.assertNotIn('bridge.call("'+method+'"',text)
+		self.assertNotRegex(text,"[\u2013\u2014]")
+		self.assertIn("navigator.clipboard.writeText",text)
 
 
 @unittest.skipUnless(_enabled, "Set REWARDS_APP_UI_TESTS=1 for isolated Accounts UI tests")
@@ -143,6 +156,139 @@ class AccountsTests(unittest.TestCase):
 			from selenium.webdriver.support.ui import WebDriverWait
 			expected = "waiting" if fixture == "signin" else "failed"
 			WebDriverWait(_harness.driver, 5).until(lambda driver: driver.execute_script("return document.querySelector('[data-signin-state]')?.dataset.signinState") == expected)
+
+	def test_f104_invited_rows_are_notes_not_accounts(self):
+		self.open("invitations")
+		self.js("""
+		 const row=document.querySelector('[data-friend]'),friend=row.dataset.friend,sw=row.querySelector('[role=switch]');
+		 assert(row.closest('.accounts-list')===document.querySelector('[data-account]').closest('.accounts-list'),'F104 one list');
+		 assert(row.querySelector('.account-row-label').textContent==='Synthetic Friend'&&row.querySelector('.account-row-email bdi').textContent==='friend@example.invalid','F104 entered name and email');
+		 assert(row.querySelector('.accounts-invited-chip').textContent===i.t('accounts.invited.status'),'F104 invited chip');
+		 assert(sw.disabled&&sw.tabIndex===-1&&sw.getAttribute('aria-disabled')==='true'&&sw.getAttribute('aria-checked')==='false','F104 disabled off switch');
+		 assert(document.getElementById(sw.getAttribute('aria-labelledby')).textContent===i.t('accounts.invited.auto_farm'),'F104 accessible No label');
+		 assert(document.getElementById(sw.getAttribute('aria-describedby')).textContent===i.t('accounts.invited.auto_farm_disabled'),'F104 accessible reason');
+		 sw.click();assert(sw.getAttribute('aria-checked')==='false','F104 switch never changes');
+		 assert(!row.hasAttribute('data-account')&&!row.querySelector('[id^=accounts-signin-],[id^=accounts-pause-],[id^=accounts-rename-],[id^=accounts-remove-]'),'F104 no account actions');
+		 assert(!s.get('accounts').some(account=>account.id===friend),'F104 friend never enters account store');
+		 const actionIds=[...row.querySelectorAll('button:not(:disabled)')].map(button=>button.id);
+		 assert(actionIds.length===2&&actionIds.every(id=>id.startsWith('accounts-friend-edit-')||id.startsWith('accounts-friend-remove-')),'F104 only note edit and remove');
+		 assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F104 null referral figures stay unknown');
+		 assert(document.querySelector('.accounts-referral-read time').dateTime==='2026-10-25T22:00:00Z','F104 read timestamp');
+		 """)
+		self.assertEqual([],_harness.errors())
+
+	def test_f104_add_edit_remove_and_cancel_use_mock_notes(self):
+		self.open("invitations-unknown")
+		self.js("""
+		 const api=window.pywebview.api,mutations=[];
+		 for(const method of ['save_invited_friend','remove_invited_friend']){const original=api[method];api[method]=async request=>{mutations.push({method,request:structuredClone(request)});return original(request)}}
+		 for(const method of ['add_account','sign_in_again','set_account_paused','remove_account','start_run','stop_run','get_account_picture'])api[method]=async()=>{throw Error('F104 forbidden friend account action '+method)};
+		 const type=(id,value)=>{const node=document.getElementById(id);node.value=value;node.dispatchEvent(new Event('input',{bubbles:true}))};
+		 document.getElementById('accounts-friend-add').click();assert(document.activeElement.id==='accounts-friend-name','F104 add focuses name');
+		 assert(document.getElementById('accounts-friend-name').maxLength===40&&document.getElementById('accounts-friend-email').maxLength===254,'F104 contract limits');
+		 document.getElementById('accounts-friend-save').click();assert(!mutations.length,'F104 invalid blank form never saved');
+		 type('accounts-friend-name','  Jamie  ');type('accounts-friend-email','jamie@example.invalid');document.getElementById('accounts-friend-save').click();
+		 await wait(()=>document.querySelectorAll('[data-friend]').length===1&&!document.querySelector('.accounts-friend-editor'));
+		 const row=[...document.querySelectorAll('[data-friend]')].find(node=>node.querySelector('.account-row-label').textContent==='Jamie'),id=row.dataset.friend;
+		 assert(mutations[0].request.name==='Jamie'&&mutations[0].request.email==='jamie@example.invalid'&&!Object.hasOwn(mutations[0].request,'id'),'F104 add exact note payload');
+		 assert((await api.get_invited_friends({})).data.invited_friends.length===1,'F104 mock persisted add');
+		 document.getElementById('accounts-friend-edit-'+id).click();type('accounts-friend-name','<script>Jamie</script>');type('accounts-friend-email','jamie.new@example.invalid');
+		 document.getElementById('accounts-friend-save').click();await wait(()=>!document.querySelector('.accounts-friend-editor'));
+		 assert(mutations[1].request.id===id&&document.querySelector('[data-friend="'+id+'"] .account-row-label').textContent==='<script>Jamie</script>'&&!document.querySelector('#view script'),'F104 edit is literal safe text');
+		 const remove=()=>document.getElementById('accounts-friend-remove-'+id).click();remove();await wait(()=>document.getElementById('dialog').open);
+		 assert(document.getElementById('dialog').textContent.includes(i.t('accounts.invited.remove_body')),'F104 remove explains local note only');
+		 await new Promise(resolve=>{document.getElementById('dialog').addEventListener('close',resolve,{once:true});document.querySelector('#dialog .button-ghost').click()});assert(mutations.length===2,'F104 cancel no write');
+		 remove();await wait(()=>document.getElementById('dialog').open);document.querySelector('#dialog .button-danger').click();
+		 await wait(()=>!document.querySelector('[data-friend="'+id+'"]'));assert(mutations[2].method==='remove_invited_friend'&&Object.keys(mutations[2].request).join(',')==='id'&&mutations[2].request.id===id,'F104 exact remove note payload');
+		 assert((await api.get_invited_friends({})).data.invited_friends.length===0&&document.querySelector('.accounts-invited-empty')&&s.get('accounts').length===1,'F104 local removal empty state and no account changes');
+		 """)
+		self.assertEqual([],_harness.errors())
+
+	def test_f104_referral_copy_user_gesture_and_selection_fallback(self):
+		from selenium.webdriver.support.ui import WebDriverWait
+		self.open("invitations")
+		self.js("""
+		 const input=document.getElementById('accounts-referral-link');assert(input.readOnly&&input.dir==='ltr','F104 read-only link');
+		 Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.f104Copied={text,active:navigator.userActivation.isActive}}}});
+		 """)
+		_harness.driver.find_element("id","accounts-referral-copy").click()
+		WebDriverWait(_harness.driver,5).until(lambda driver:driver.execute_script("return Boolean(window.f104Copied)"))
+		self.js("""
+		 assert(window.f104Copied.active&&window.f104Copied.text===document.getElementById('accounts-referral-link').value,'F104 clipboard in real gesture');
+		 assert(document.querySelector('.accounts-referral-feedback').textContent===i.t('accounts.referrals.copied'),'F104 copied only after success');
+		 navigator.clipboard.writeText=async()=>{throw Error('synthetic clipboard denial')};
+		 """)
+		_harness.driver.find_element("id","accounts-referral-copy").click()
+		self.js("""
+		 await wait(()=>document.querySelector('.accounts-referral-feedback').textContent===i.t('accounts.referrals.select'));
+		 const input=document.getElementById('accounts-referral-link');assert(document.activeElement===input&&input.selectionStart===0&&input.selectionEnd===input.value.length,'F104 denied clipboard selects exact link');
+		 """)
+		self.assertEqual([],_harness.errors())
+
+	def test_f104_unreadable_codes_empty_state_and_null_vs_zero(self):
+		self.open("invitations-unknown")
+		self.js("""
+		 const {referralUnreadableCodes}=await import('./js/screens/accounts/invitations.js'),router=await import('./js/router.js');
+		 assert(document.querySelector('.accounts-invited-empty').textContent===i.t('accounts.invited.empty')&&!document.querySelector('[data-friend]'),'F104 empty local notes');
+		 let info;window.pywebview.api.get_referral_info=async()=>({ok:true,data:structuredClone(info)});
+		 const remount=async()=>{router.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));router.navigate('#/accounts');await wait(()=>document.querySelector('.accounts-referrals')&&!document.querySelector('.accounts-referrals .spinner'))};
+		 for(const code of referralUnreadableCodes){
+		  info={link:'https://rewards.bing.com/refer?code=SYNTHETIC',link_found:true,referrals:null,friends:null,read_at:'2026-10-25T22:00:00Z',unreadable:code};await remount();
+		  assert(!document.getElementById('accounts-referral-copy')&&!document.getElementById('accounts-referral-link'),'F104 unreadable never offers link '+code);
+		  assert(document.querySelector('[data-referral-unreadable]').textContent===i.t('accounts.referrals.unreadable.'+code),'F104 exact unreadable key '+code);
+		  assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F104 null not zero '+code);
+		 }
+		 info={link:null,link_found:false,referrals:0,friends:[],read_at:null,unreadable:null};await remount();
+		 assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.formatNumber(0)),'F104 observed zero is distinct from unknown');
+		 assert(!document.querySelector('.accounts-referral-read')&&!document.getElementById('accounts-referral-copy'),'F104 absent timestamp and link not invented');
+		 """)
+		self.assertEqual([],_harness.errors())
+
+	def test_f104_friend_save_failure_and_remove_failure_retain_note(self):
+		self.open("invitations")
+		self.js("""
+		 const api=window.pywebview.api,bad={ok:false,error:{code:'internal',message_key:'errors.app.internal',params:{},detail:null,fields:null}};
+		 api.save_invited_friend=async()=>bad;
+		 document.querySelector('[id^=accounts-friend-edit-]').click();document.getElementById('accounts-friend-save').click();
+		 await wait(()=>document.querySelector('.accounts-list .banner.tone-error'));
+		 assert(document.querySelector('.accounts-friend-editor')&&!document.getElementById('accounts-friend-save').disabled&&document.querySelector('[data-friend]'),'F104 save error keeps input and note');
+		 document.getElementById('accounts-friend-cancel').click();api.remove_invited_friend=async()=>bad;
+		 document.querySelector('[id^=accounts-friend-remove-]').click();await wait(()=>document.getElementById('dialog').open);document.querySelector('#dialog .button-danger').click();
+		 await wait(()=>document.querySelector('.accounts-list .banner.tone-error'));assert(document.querySelector('[data-friend]'),'F104 remove error never loses note');
+		 """)
+		self.assertEqual([],_harness.errors())
+
+	def test_f104_failed_note_and_referral_loads_keep_account_list(self):
+		self.open("invitations")
+		self.js("""
+		 const router=await import('./js/router.js'),bad={ok:false,error:{code:'accounts_unknown',message_key:'errors.app.accounts_unknown',params:{},detail:null,fields:null}};
+		 window.pywebview.api.get_invited_friends=async()=>bad;window.pywebview.api.get_referral_info=async()=>bad;
+		 router.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));router.navigate('#/accounts');
+		 await wait(()=>document.querySelectorAll('.accounts-screen .banner.tone-error').length===2);
+		 assert(document.querySelector('[data-account]')&&document.querySelectorAll('.accounts-screen .banner-message').length===2,'F104 read errors preserve real accounts');
+		 assert([...document.querySelectorAll('.accounts-screen .banner-message')].every(node=>node.textContent===i.t('errors.app.accounts_unknown')),'F104 real envelope error message');
+		 assert(!document.getElementById('accounts-referral-copy')&&!document.getElementById('accounts-referral-link'),'F104 failed refresh does not offer old referral link');
+		 """)
+		self.assertEqual([],_harness.errors())
+
+	def test_f104_layout_long_rtl_and_parent_captures(self):
+		for width,height in ((1280,800),(860,600)):
+			_harness.viewport(width,height)
+			for theme in ("light","dark"):
+				for lang in ("en","x-long","x-rtl"):
+					with self.subTest(width=width,theme=theme,lang=lang):
+						self.open("invitations",theme,lang)
+						self.js("assert(!document.querySelector('[style]'),'F104 CSP');assert(document.documentElement.scrollWidth<=innerWidth+1&&document.getElementById('view').scrollWidth<=document.getElementById('view').clientWidth+1,'F104 list no overflow');document.getElementById('accounts-friend-add').click();assert(document.documentElement.scrollWidth<=innerWidth+1,'F104 editor no overflow');document.getElementById('accounts-friend-cancel').click();")
+						if lang=="en":
+							folder=os.environ.get("RF_F104_CAPTURE")
+							if folder:
+								from PIL import Image
+								import base64,io
+								_harness.driver.execute_async_script("const done=arguments[0];document.fonts.ready.then(()=>requestAnimationFrame(()=>requestAnimationFrame(done)))")
+								_harness.driver.execute_script("document.getElementById('view').scrollTop=0;document.activeElement?.blur()")
+								png=base64.b64decode(_harness.driver.execute_cdp_cmd('Page.captureScreenshot',{'format':'png','fromSurface':True,'captureBeyondViewport':False})['data']);self.assertEqual((width,height),Image.open(io.BytesIO(png)).size)
+								path=Path(folder).resolve();self.assertTrue(path.is_relative_to(Path(tempfile.gettempdir()).resolve()));path.mkdir(parents=True,exist_ok=True);(path/f'accounts-{theme}-{width}x{height}.png').write_bytes(png)
+						self.assertEqual([],_harness.errors())
 
 	def test_footer_and_account_row_share_identity_initial_priority(self):
 		self.open("list")
