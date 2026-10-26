@@ -17,6 +17,7 @@ import desktop_utils
 import rewards_tasks
 import rewards_state
 import referrals
+import identity
 import element_selectors
 import run_record
 import run_lock
@@ -39,12 +40,15 @@ class RunPlan:
 	check_only: bool = False
 	min_points: int | None = None
 	run_if_unreadable: bool = False
+	require_identity: bool = False
 
 
 _plan = RunPlan()
 _stop_requested = False
 _account_started = False
 _account_ran = False
+_identity_failures = 0
+_identity_matches = 0
 
 
 def decision_state(state: rewards_state.RewardsState) -> rewards_state.RewardsState:
@@ -91,6 +95,11 @@ def _record_referrals(driver, account):
 		state = referrals.read_referral_page(driver)
 	except Exception:
 		state = referrals.ReferralState(unreadable="read_failed")
+	try:
+		# Leaving the referral page avoids its observed slow browser shutdown.
+		driver.get("https://rewards.bing.com/")
+	except Exception:
+		run_record.emit("warning", code="referral_return_failed", detail=None)
 	read_at = run_record._timestamp()
 	recorder = run_record.current()
 	account_id = "@root" if account.is_default else account.name
@@ -105,7 +114,7 @@ def _record_referrals(driver, account):
 
 def run_account(account: accounts.Account) -> bool:
 	"""Work one account. Returns whether the browser started."""
-	global _account_started, _account_ran
+	global _account_started, _account_ran, _identity_failures, _identity_matches
 	began = time.monotonic()
 	_account_started = _account_ran = False
 	run_record.emit("account_start", account=account.name, profile=account.user_data_dir)
@@ -126,6 +135,15 @@ def run_account(account: accounts.Account) -> bool:
 
 	_account_started = True
 	try:
+		if _plan.require_identity:
+			driver.set_page_load_timeout(60)
+			status, reason = identity.check_account(driver, "@root" if account.is_default else account.name)
+			run_record.emit("identity_check", account=account.name, status=status, reason=reason)
+			if status != "match":
+				_identity_failures += 1
+				ended("identity_mismatch" if status == "mismatch" else "identity_unknown")
+				return False
+			_identity_matches += 1
 		only = None
 		if _plan.read_state:
 			driver.set_page_load_timeout(60)
@@ -180,11 +198,13 @@ def run_account(account: accounts.Account) -> bool:
 
 
 def main(unattended: bool = False, plan: RunPlan | None = None) -> int:
-	global _plan, _stop_requested, _account_started, _account_ran
+	global _plan, _stop_requested, _account_started, _account_ran, _identity_failures, _identity_matches
 	_plan = plan or RunPlan()
 	_plan = dataclasses.replace(_plan, read_state=_plan.read_state or _plan.only_if_open or _plan.check_only,
 		min_points=(_plan.min_points if _plan.min_points is not None else int(os.environ.get(MIN_POINTS_ENV, DEFAULT_MIN_POINTS))) if _plan.only_if_open else _plan.min_points)
 	_stop_requested = False
+	_identity_failures = 0
+	_identity_matches = 0
 	log_utils.setup_logging()
 	desktop_utils.reset_virtual_desktop_state()
 
@@ -238,7 +258,9 @@ def main(unattended: bool = False, plan: RunPlan | None = None) -> int:
 			input("Press Enter to exit...")
 		code = 0 if started else 1
 		stats = recorder.stats
-		if _plan.check_only:
+		if _identity_failures:
+			result, code = ("partial", 0) if started or _plan.check_only and _identity_matches else ("failed", 1)
+		elif _plan.check_only:
 			result = "checked"
 		elif stats["accounts_started"] == 0 or (not started and stats["account_error"]):
 			result = "failed"
@@ -281,6 +303,7 @@ def cli(argv: list[str] | None = None) -> int:
 	parser.add_argument("--min-points", type=int)
 	parser.add_argument("--run-if-unreadable", action="store_true")
 	parser.add_argument("--check-only", action="store_true")
+	parser.add_argument("--require-identity", action="store_true")
 	arguments = parser.parse_args(argv)
 
 	if os.path.isfile(DOTENV_PATH):
@@ -298,7 +321,7 @@ def cli(argv: list[str] | None = None) -> int:
 	if minimum is not None and minimum < 0:
 		parser.error("--min-points must not be negative")
 	return main(unattended=arguments.unattended, plan=RunPlan(arguments.read_state or arguments.only_if_open or arguments.check_only,
-		arguments.only_if_open, arguments.check_only, minimum, arguments.run_if_unreadable))
+		arguments.only_if_open, arguments.check_only, minimum, arguments.run_if_unreadable, arguments.require_identity))
 
 
 if __name__ == "__main__":

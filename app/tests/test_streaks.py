@@ -165,7 +165,9 @@ class LatestTests(unittest.TestCase):
 		self.now = datetime(2026, 10, 20, 21, tzinfo=timezone.utc)
 		self.write("20261020T190000Z", capture())
 		value = runs.overview(self.settings, self.prefs, self.now)
-		self.assertEqual(value["streaks"], expected())
+		self.assertIsNone(value["streaks"])
+		self.assertEqual(value["streaks_by_account"]["sample"], expected())
+		self.assertIsNone(value["streaks_by_account"]["second"])
 		self.active, self.paused = ["second"], []
 		self.assertIsNone(runs.overview(self.settings, self.prefs, self.now)["streaks"])
 

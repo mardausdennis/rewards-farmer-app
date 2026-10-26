@@ -13,6 +13,9 @@ export function mount(view, ctx) {
     const t = i18n.t;
     const number = (value) => value === null || value === undefined ? t("common.value.unknown") : i18n.formatNumber(value);
     let selectedId = null;
+    let allAccounts = true;
+    let scopedOverview = null;
+    let loadingScope = false;
     let chartMode = "balance";
     let active = true;
     let starting = false;
@@ -25,19 +28,31 @@ export function mount(view, ctx) {
     }
     async function refresh() {
         const token = ++revision;
+        const accountId = selectedId && !allAccounts ? selectedId : null;
+        loadingScope = true;
+        render();
         try {
-            const data = await bridge.call("get_overview");
-            if (active && token === revision) store.set("overview", data);
+            const data = await bridge.call("get_overview", accountId ? { account_id: accountId } : {});
+            if (active && token === revision) {
+                if (accountId) { scopedOverview = data; render(); }
+                else {
+                    if (store.get("overview")?.accounts.length !== data.accounts.length) { allAccounts = data.accounts.length > 1; selectedId = null; }
+                    loadingScope = false;
+                    store.set("overview", data);
+                }
+            }
         } catch (error) { report(error); }
+        finally { if (active && token === revision) { loadingScope = false; render(); } }
     }
     async function startRun() {
         const overview = store.get("overview");
-        const account = overview?.accounts.find((item) => item.account_id === selectedId);
-        if (starting || !account || account.paused || overview.active_run || overview.signin_active || store.get("live")?.run?.active || ["signed_out", "terms_of_use"].includes(account.state?.unreadable)) return;
+        const id = allAccounts && overview?.accounts.length > 1 ? null : selectedId;
+        const account = overview?.accounts.find((item) => item.account_id === id);
+        if (starting || !overview || (id && (!account || account.paused || ["signed_out", "terms_of_use"].includes(account.state?.unreadable))) || (!id && !overview.accounts.some((item) => !item.paused)) || overview.active_run || overview.signin_active || store.get("live")?.run?.active) return;
         starting = true;
         render();
         try {
-            await bridge.call("start_run", selectedId ? { account_ids: [selectedId] } : {});
+            await bridge.call("start_run", id ? { account_ids: [id] } : {});
             if (active) router.navigate("#/live");
         } catch (error) { report(error); }
         finally {
@@ -56,6 +71,7 @@ export function mount(view, ctx) {
             const data = await bridge.call("set_goal", { account_id: accountId, target });
             if (active) {
                 const overview = store.get("overview");
+                if (scopedOverview) scopedOverview = { ...scopedOverview, accounts: scopedOverview.accounts.map((account) => account.account_id === accountId ? { ...account, goal: data.goal } : account) };
                 if (overview) store.set("overview", { ...overview, accounts: overview.accounts.map((account) => account.account_id === accountId ? { ...account, goal: data.goal } : account) });
             }
         } catch (error) { report(error); }
@@ -126,7 +142,7 @@ export function mount(view, ctx) {
         if (savingGoal) region.append(el("p", { role: "status", text: t("overview.goal.saving") }));
         return region;
     }
-    function streaksRegion(streaks) {
+    function streaksRegion(streaks, suffix = "") {
         if (!streaks) return null;
         const known = (value) => Number.isInteger(value) && value >= 0;
         const captured = new Date(streaks.captured_at);
@@ -158,7 +174,7 @@ export function mount(view, ctx) {
         for (const id of Object.keys(names)) {
             const item = streaks.items?.find((entry) => entry.id === id);
             if (!item || !known(item.day)) continue;
-            const nameId = `overview-streak-${id}`;
+            const nameId = `overview-streak-${id}${suffix}`;
             const copy = el("div", { class: "overview-streak-copy" }, el("h3", { id: nameId, class: "overview-streak-name", text: t(names[id]) }));
             if (known(item.next_points)) copy.append(el("p", { class: "overview-streak-next", text: t("overview.streaks.next", { count: item.next_points }) }));
             const progress = el("div", { class: "overview-streak-progress" });
@@ -176,11 +192,11 @@ export function mount(view, ctx) {
         if (rows.childElementCount) content.push(rows);
         if (Number.isFinite(captured.getTime())) content.push(el("p", { class: "overview-streak-captured" }, el("time", { datetime: streaks.captured_at, text: t("overview.streaks.as_of", { date: i18n.formatDate(captured), time: i18n.formatTime(captured) }) })));
         const card = c.card.create({ titleKey: "overview.streaks.title", children: content });
-        card.id = "overview-streaks";
+        card.id = `overview-streaks${suffix}`;
         card.classList.add("overview-streaks");
         card.dataset.region = "streaks";
         const heading = card.querySelector("h2");
-        heading.id = "overview-streaks-title";
+        heading.id = `overview-streaks-title${suffix}`;
         card.setAttribute("aria-labelledby", heading.id);
         return card;
     }
@@ -188,8 +204,10 @@ export function mount(view, ctx) {
         if (!active) return;
         const focusedId = view.contains(document.activeElement) ? document.activeElement.id : null;
         c.dispose(view);
-        const overview = store.get("overview");
+        const base = store.get("overview");
+        const overview = scopedOverview || base;
         const root = el("section", { class: "screen overview-screen", "data-screen": "overview" });
+        root.setAttribute("aria-busy", String(loadingScope));
         const header = el("header", { class: "screen-header" }, el("div", {}, [el("h1", { text: t("overview.title") }), overview ? el("p", { text: snapshotDate(overview.generated_at, i18n) }) : null]));
         root.append(header);
         if (!overview) {
@@ -198,6 +216,38 @@ export function mount(view, ctx) {
             return;
         }
         const accounts = overview.accounts;
+        const choices = base?.accounts || accounts;
+        if (choices.length === 1) allAccounts = false;
+        if (selectedId && !choices.some((account) => account.account_id === selectedId)) { selectedId = null; allAccounts = choices.length > 1; }
+        if (choices.length > 1) header.append(c.select.create({ id: "overview-account", labelKey: "overview.account", value: allAccounts ? "all" : selectedId || accounts[0]?.account_id, options: [{ value: "all", labelKey: "overview.account.all" }, ...choices.map((item) => ({ value: item.account_id, label: item.label }))], onChange: (id) => { allAccounts = id === "all"; selectedId = allAccounts ? null : id; scopedOverview = null; render(); refresh(); } }));
+        if (loadingScope && choices.length > 1) {
+            root.append(c.spinner.create({ labelKey: "common.action.working" }));
+            view.replaceChildren(root);
+            if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true });
+            return;
+        }
+        if (allAccounts && choices.length > 1) {
+            const totals = overview.totals || {};
+            root.append(c.card.create({ children: el("div", { class: "overview-account-totals", "data-region": "totals" }, [c.stat.create({ labelKey: "overview.balance", value: number(totals.balance) }), c.stat.create({ labelKey: "overview.earned_today", value: number(totals.earned_today) }), c.stat.create({ labelKey: "overview.still_open", value: number(totals.open_points) })]) }));
+            root.append(scheduleRegion(overview.schedule, overview.generated_at));
+            const run = c.button.create({ labelKey: "overview.run_now", variant: "primary", disabled: starting || Boolean(overview.active_run || overview.signin_active || store.get("live")?.run?.active) || accounts.every((item) => item.paused), onClick: startRun });
+            run.id = "overview-run-now"; root.append(run);
+            const summaries = el("div", { class: "overview-account-summaries" });
+            for (const item of accounts) {
+                const section = el("section", { class: "overview-account-summary", "data-overview-account": item.account_id }, [el("h2", {}, el("bdi", { text: item.label })), c.stat.create({ labelKey: "overview.balance", value: number(item.state?.balance) })]);
+                const notice = stateNotice(item);
+                if (notice) section.append(notice);
+                const streaks = streaksRegion(overview.streaks_by_account?.[item.account_id], `-${encodeURIComponent(item.account_id)}`);
+                if (streaks) section.append(streaks);
+                else section.append(el("p", { class: "subtle", text: t("overview.streaks.unknown") }));
+                section.append(c.button.create({ labelKey: "overview.account.open", params: { account: item.label }, variant: "ghost", onClick: () => { allAccounts = false; selectedId = item.account_id; scopedOverview = null; render(); refresh(); } }));
+                summaries.append(section);
+            }
+            root.append(summaries);
+            view.replaceChildren(root);
+            if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true });
+            return;
+        }
         if (!accounts.some((account) => account.account_id === selectedId)) selectedId = accounts[0]?.account_id || null;
         const account = accounts.find((item) => item.account_id === selectedId);
         if (!account) {
@@ -205,7 +255,6 @@ export function mount(view, ctx) {
             view.replaceChildren(root);
             return;
         }
-        if (accounts.length > 1) header.append(c.select.create({ id: "overview-account", labelKey: "overview.account", value: selectedId, options: accounts.map((item) => ({ value: item.account_id, label: item.label })), onChange: (id) => { selectedId = id; render(); } }));
         const notice = stateNotice(account);
         if (notice) root.append(el("div", { class: "overview-notice" }, notice));
         const todayKnown = Boolean(account.state_is_today && account.state && !["signed_out", "terms_of_use", "page_blank"].includes(account.state.unreadable) && (account.state.unreadable || Number.isFinite(account.state.earned_today)));
@@ -226,7 +275,7 @@ export function mount(view, ctx) {
         const balanceKnown = account.state?.balance !== null && account.state?.balance !== undefined;
         const balance = c.stat.create({ labelKey: "overview.balance", value: number(account.state?.balance) });
         if (!balanceKnown) balance.classList.add("is-unknown");
-        const balanceContent = todayKnown || balanceKnown ? el("div", { class: "overview-balance" }, [balance, balanceKnown ? el("p", { class: "balance-unit", text: t("overview.points_unit") }) : null]) : null;
+        const balanceContent = todayKnown || balanceKnown || choices.length > 1 ? el("div", { class: "overview-balance" }, [balance, balanceKnown ? el("p", { class: "balance-unit", text: t("overview.points_unit") }) : null]) : null;
         if (!todayKnown && balanceKnown) balanceContent.append(el("p", { class: "overview-balance-captured subtle" }, el("time", { datetime: account.state.at, text: t("overview.streaks.as_of", { date: i18n.formatDate(account.state.at), time: i18n.formatTime(account.state.at) }) })));
         const runReason = signinRequired ? el("div", { class: "overview-run-reason" }, [
             el("p", { text: t(account.state.unreadable === "signed_out" ? "overview.run_signed_out" : "overview.run_terms") }),
@@ -243,7 +292,7 @@ export function mount(view, ctx) {
         summary.classList.add("overview-summary");
         summary.dataset.region = "summary";
         root.append(el("div", { class: `overview-spread${todayKnown ? "" : " is-known-only"}` }, [plan, summary]));
-        const streaks = todayKnown ? streaksRegion(overview.streaks) : null;
+        const streaks = todayKnown ? streaksRegion(overview.streaks_by_account ? overview.streaks_by_account[account.account_id] : overview.streaks) : null;
         if (streaks) root.append(streaks);
         const choice = c.segmented.create({ id: "overview-chart-mode", labelKey: "overview.chart.mode", value: chartMode, options: [{ value: "balance", labelKey: "common.chart.balance" }, { value: "earned", labelKey: "common.chart.earned" }], onChange: (value) => { chartMode = value; chartNode = c.pointsChart.update(chartNode, { series: account.chart, mode: chartMode }); } });
         chartNode = c.pointsChart.create({ series: account.chart, mode: chartMode });
@@ -256,10 +305,13 @@ export function mount(view, ctx) {
         if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true });
     }
     let liveActive = Boolean(store.get("live")?.run?.active);
-    const unsubscribe = [store.on("overview", render), store.on("live", (value) => {
+    const unsubscribe = [store.on("overview", () => { revision++; scopedOverview = null; render(); if (!allAccounts && selectedId && store.get("overview")?.accounts.length > 1) refresh(); }), store.on("live", (value) => {
         const nextActive = Boolean(value?.run?.active);
         if (nextActive !== liveActive) { liveActive = nextActive; render(); }
     })];
-    render();
+    const knownAccounts = store.get("accounts");
+    const snapshotAccounts = store.get("overview")?.accounts;
+    if (knownAccounts && snapshotAccounts && (knownAccounts.length !== snapshotAccounts.length || knownAccounts.some(account => !snapshotAccounts.some(item => item.account_id === account.id && item.label === account.label && item.paused === account.paused)))) refresh();
+    else render();
     return { update: render, unmount() { active = false; revision++; unsubscribe.forEach((off) => off()); c.dispose(view); } };
 }

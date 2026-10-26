@@ -107,6 +107,37 @@ class OverviewSourceTests(unittest.TestCase):
 
 @unittest.skipUnless(_enabled, "Set REWARDS_APP_UI_TESTS=1 for guarded mock UI acceptance")
 class OverviewTests(unittest.TestCase):
+	def test_f108_selector_streaks_and_single_pin(self):
+		_harness.open('#/overview','overview/ready').wait_ready()
+		self.js("assert(!document.getElementById('overview-account')&&document.querySelector('[data-region=tasks]')&&document.querySelector('.overview-balance')&&document.getElementById('overview-run-now'),'F108 single structure pinned')")
+		_harness.open('#/overview','accounts/multi-account').wait_ready()
+		self.js("""
+		 const wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await new Promise(r=>setTimeout(r,10))}throw Error('F108 overview timeout')};
+		 const select=document.getElementById('overview-account');assert(select.value==='all'&&select.options.length===3,'F108 default all no friends');
+		 assert(document.querySelector('[data-region=totals]').textContent.includes(i.t('common.value.unknown')),'F108 null total unknown');
+		 assert(document.querySelector('[data-overview-account=account-1] .overview-streaks'),'F108 account capture');
+		 assert(!document.querySelector('[data-overview-account=account-2] .overview-streaks'),'F108 missing capture not borrowed');
+		 const calls=[],original=window.pywebview.api.get_overview;window.pywebview.api.get_overview=async request=>{calls.push(request);return original(request)};
+		 select.value='account-2';select.dispatchEvent(new Event('change'));await wait(()=>calls.some(req=>req.account_id==='account-2')&&document.querySelector('.overview-balance .is-unknown'));
+		 assert(document.getElementById('overview-account').options.length===3,'F108 choices retained');
+		 let release;window.pywebview.api.get_overview=async request=>request.account_id==='account-1'?new Promise(resolve=>{release=()=>original(request).then(resolve)}):original(request);
+		 let pending=document.getElementById('overview-account');pending.value='account-1';pending.dispatchEvent(new Event('change'));await wait(()=>release);
+		 assert(!document.querySelector('.overview-balance'),'F108 old balance hidden under pending scope');
+		 pending=document.getElementById('overview-account');pending.value='account-2';pending.dispatchEvent(new Event('change'));await wait(()=>document.querySelector('.overview-balance .is-unknown'));release();await new Promise(resolve=>setTimeout(resolve,30));
+		 assert(document.getElementById('overview-account').value==='account-2'&&document.querySelector('.overview-balance .is-unknown'),'F108 stale response cannot replace selected account');window.pywebview.api.get_overview=async request=>{calls.push(request);return original(request)};
+		 const next=document.getElementById('overview-account');next.value='account-1';next.dispatchEvent(new Event('change'));await wait(()=>calls.some(req=>req.account_id==='account-1')&&document.getElementById('overview-streaks'));
+		 const all=document.getElementById('overview-account');all.value='all';all.dispatchEvent(new Event('change'));await wait(()=>document.querySelectorAll('[data-overview-account]').length===2);
+		 """)
+		self.assertEqual([], _harness.errors())
+
+	def test_f108_overview_captures(self):
+		for theme in ('light','dark'):
+			for width,height in ((1280,800),(860,600)):
+				_harness.viewport(width,height);_harness.open('#/overview','accounts/multi-account',theme).wait_ready()
+				self.js("assert(document.getElementById('overview-account').value==='all','F108 default captured');assert(document.documentElement.scrollWidth<=innerWidth+1,'F108 overview fits');assert([...document.querySelectorAll('.overview-account-totals .stat-value')].every(node=>parseFloat(getComputedStyle(node).fontSize)<=32),'F108 unknown totals do not dominate accounts')")
+				if os.environ.get('RF_F108_CAPTURE'):_harness.driver.save_screenshot(str(Path(os.environ['RF_F108_CAPTURE'])/f'overview-{theme}-{width}x{height}.png'))
+		_harness.viewport(1280,800)
+
 	def setUp(self):
 		_harness.viewport(1280, 800)
 
@@ -186,7 +217,7 @@ class OverviewTests(unittest.TestCase):
 			show(streaks);
 		""")
 		_harness.open("#/overview", "overview/multiple").wait_ready()
-		self.js("assert(document.querySelectorAll('.overview-stamp.is-collected').length===8,'known-count mock branch');")
+		self.js("const select=document.getElementById('overview-account');select.value='jamie';select.dispatchEvent(new Event('change'));await new Promise(resolve=>setTimeout(resolve,30));assert(document.querySelectorAll('.overview-stamp.is-collected').length===8,'known-count selected account branch');")
 		_harness.open("#/overview", "overview/first-run").wait_ready()
 		self.js("assert(!document.querySelector('#overview-streaks'),'null mock branch');")
 		self.assertEqual([], _harness.errors())
@@ -380,7 +411,8 @@ class OverviewTests(unittest.TestCase):
 								const view=document.getElementById('view');
 								assert(view.scrollWidth<=view.clientWidth+1&&document.documentElement.scrollWidth<=innerWidth+1,'horizontal overflow');
 								const overview=s.get('overview');
-								if(overview?.accounts.length){const account=overview.accounts[0],today=!!(account.state_is_today&&account.state&&!['signed_out','terms_of_use','page_blank'].includes(account.state.unreadable)&&(account.state.unreadable||Number.isFinite(account.state.earned_today)));assert(document.querySelectorAll('.task-row').length===(today?7:0),'only known today has task rows');assert(document.querySelectorAll('.points-chart tbody tr').length===30,'all chart days accessible');}
+								if(overview?.accounts.length>1){assert(document.getElementById('overview-account').value==='all','F108 multiple-account default');assert(document.querySelectorAll('[data-overview-account]').length===overview.accounts.length,'F108 every real account has its own summary');assert(!document.querySelector('.task-row,.points-chart'),'F108 aggregate does not mix account tasks or charts');const values=[...document.querySelectorAll('[data-region=totals] .stat-value')],keys=['balance','earned_today','open_points'];assert(values.length===3&&keys.every((key,index)=>strip(values[index].textContent)===strip(Number.isFinite(overview.totals[key])?i.formatNumber(overview.totals[key]):i.t('common.value.unknown'))),'F108 backend aggregate values, never a partial sum');}
+								else if(overview?.accounts.length){const account=overview.accounts[0],today=!!(account.state_is_today&&account.state&&!['signed_out','terms_of_use','page_blank'].includes(account.state.unreadable)&&(account.state.unreadable||Number.isFinite(account.state.earned_today)));assert(!document.getElementById('overview-account'),'F108 single-account selector absent');assert(document.querySelectorAll('.task-row').length===(today?7:0),'only known today has task rows');assert(document.querySelectorAll('.points-chart tbody tr').length===30,'all chart days accessible');}
 								assert(document.documentElement.dir===(new URLSearchParams(location.search).get('lang')==='x-rtl'?'rtl':'ltr'),'direction');
 							""")
 							if width == 1280:
@@ -566,10 +598,12 @@ class OverviewTests(unittest.TestCase):
 	def test_c_account_chart_goal_and_actions(self):
 		_harness.open("#/overview", "overview/multiple").wait_ready()
 		self.js("""
+			assert(document.getElementById('overview-account').value==='all','F108 aggregate default');
+			const first=document.getElementById('overview-account');first.value='jamie';first.dispatchEvent(new Event('change'));await new Promise(resolve=>setTimeout(resolve,30));
 			assert(document.querySelector('[data-task=daily_set]').dataset.status==='open','ok still open not checked');
 			assert(document.querySelector('[data-task=misc_cards]').dataset.status==='fail','failure not hidden by count');
 			assert(document.querySelectorAll('.chart-line').length===2&&document.querySelectorAll('.chart-point').length>=2,'missing days split line and isolated latest point');
-			const select=document.querySelector('#overview-account'); select.value='riley'; select.dispatchEvent(new Event('change'));
+			const select=document.querySelector('#overview-account'); select.value='riley'; select.dispatchEvent(new Event('change'));await new Promise(resolve=>setTimeout(resolve,30));
 			assert(document.querySelector('.stat-value').textContent==='2,340','account balance changes');
 			assert(document.querySelector('#overview-run-now').disabled,'active or paused run disabled');
 			assert(document.querySelector('[data-region=open] strong').textContent===i.t('overview.open.none'),'measured zero is nothing open');

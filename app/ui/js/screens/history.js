@@ -17,6 +17,8 @@ export function mount(view, ctx) {
     let pageBusy = false;
     let selectedButton = null;
     let detailEpoch = 0;
+    let accountId = null;
+    const accountOptions = () => ctx.store.get("accounts") || [];
     const details = new Map();
     const pendingDetails = new Map();
     const logPanels = new Map();
@@ -67,7 +69,7 @@ export function mount(view, ctx) {
     }
 
     async function fetchPage(append, stamp) {
-        const data = await bridge.call("get_history", { limit: 50, include_checks: true, ...(append && nextBefore ? { before: nextBefore } : {}) });
+        const data = await bridge.call("get_history", { limit: 50, include_checks: true, ...(accountId ? { account_id: accountId } : {}), ...(append && nextBefore ? { before: nextBefore } : {}) });
         if (!alive || stamp !== generation) return false;
         mergePage(data, append);
         return true;
@@ -77,7 +79,7 @@ export function mount(view, ctx) {
         if (details.has(id)) return Promise.resolve(details.get(id));
         if (pendingDetails.has(id)) return pendingDetails.get(id);
         const epoch = detailEpoch;
-        const pending = bridge.call("get_run", { run_id: id }).then(run => { if (alive && epoch === detailEpoch) details.set(id, run); return run; }).finally(() => { if (pendingDetails.get(id) === pending) pendingDetails.delete(id); });
+        const pending = bridge.call("get_run", { run_id: id, ...(accountId ? { account_id: accountId } : {}) }).then(run => { if (alive && epoch === detailEpoch) details.set(id, run); return run; }).finally(() => { if (pendingDetails.get(id) === pending) pendingDetails.delete(id); });
         pendingDetails.set(id, pending);
         return pending;
     }
@@ -138,6 +140,7 @@ export function mount(view, ctx) {
         more.hidden = !nextBefore;
         root.append(el("header", { class: "screen-header" }, [el("h1", { text: t("history.title") }), action("history.refresh", () => navigate(params, true))]), notices,
             el("div", { class: "history-workspace" }, [el("div", { class: "history-date-rail" }, [dateHost, more]), pageHost]));
+        if (accountOptions().length > 1) root.querySelector(".screen-header").append(c.select.create({ id: "history-account", labelKey: "history.account", value: accountId || "all", options: [{ value: "all", labelKey: "history.account.all" }, ...accountOptions().map(account => ({ value: account.id, label: account.label }))], onChange: value => { accountId = value === "all" ? null : value; runs = []; nextBefore = null; navigate({}, true); } }));
     }
 
     function technicalDetails(account) {
@@ -205,6 +208,19 @@ export function mount(view, ctx) {
             el("div", { class: "history-run-marks" }, exceptionMarks([detail])), el("span", { class: "sr-only", text: result(detail) }),
             detail.result !== "failed" && Number.isFinite(detail.points_earned) ? el("strong", { class: "history-run-points tabular", text: points(detail.points_earned) }) : null]);
         block.append(facts);
+        if (detail.points_earned === null && (detail.accounts.length > 1 || accountOptions().length > 1)) facts.append(el("strong", { class: "history-total-unknown", text: t("common.value.unknown") }));
+        if (detail.accounts.length > 1 || accountOptions().length > 1) {
+            const outcomes = el("ul", { class: "history-account-outcomes" });
+            for (const account of detail.accounts) {
+                const identityCode = account.error?.code?.replace(/^accounts\./, "");
+                const skipped = account.status === "skipped" || ["identity_mismatch", "identity_unknown", "enrollment_required"].includes(identityCode);
+                const state = skipped ? "skipped" : account.status === "failed" ? "failed" : account.status === "done" ? "ran" : "unknown";
+                const row = el("li", { "data-outcome-account": account.account_id, "data-outcome": state }, [el("bdi", { text: account.label }), el("span", { text: t(`history.account.${state}`) }), el("span", { class: "tabular", text: Number.isFinite(account.points_earned) ? points(account.points_earned) : t("common.value.unknown") })]);
+                if (account.error?.message_key) row.append(el("p", { class: "reason", text: t(identityCode === "identity_mismatch" ? "errors.browser.accounts.identity_mismatch" : identityCode === "identity_unknown" ? "errors.browser.identity_unknown" : identityCode === "enrollment_required" ? "errors.browser.enrollment_required" : account.error.message_key, { account: account.label }) }));
+                outcomes.append(row);
+            }
+            block.append(outcomes);
+        }
         const groups = taskGroups(detail.accounts);
         for (const task of groups.failed) {
             block.append(el("div", { class: "history-task-failure", "data-task": task.task, "data-status": task.status }, [
@@ -253,14 +269,17 @@ export function mount(view, ctx) {
             block.append(disclosure("history-idle history-no-points", t("history.tasks.no_points", { count: groups.noPoints.length }), [rows]));
         }
         for (const account of detail.accounts) {
-            const body = el("div", {}, [detail.accounts.length > 1 ? el("h2", {}, [el("bdi", { text: account.label })]) : null]);
+            const body = el("div");
             if (checkOnly && account.decision) body.append(el("p", { class: "muted history-decision", text: t(account.decision.reason_key, { points: account.decision.open_points, min_points: formatNumber(account.decision.min_points ?? 0) }) }));
-            if (account.error && detail.result !== "failed") body.append(c.banner.create({ tone: "error", messageKey: account.error.message_key, params: { account: account.label } }));
+            if (account.error && detail.result !== "failed" && !["identity_mismatch", "identity_unknown", "enrollment_required"].includes(account.error.code?.replace(/^accounts\./, ""))) body.append(c.banner.create({ tone: "error", messageKey: account.error.message_key, params: { account: account.label } }));
             const unreadable = stateNotice(account);
             if (unreadable) body.append(unreadable);
             const technical = technicalDetails(account);
             if (technical) body.append(technical);
-            if (body.children.length) block.append(el("section", { class: "history-account" }, [body]));
+            if (body.children.length) {
+                if (detail.accounts.length > 1) body.prepend(el("h2", {}, el("bdi", { text: account.label })));
+                block.append(el("section", { class: "history-account" }, [body]));
+            }
         }
         if (detail.log_size > 0) {
             const log = logPanels.get(detail.run_id) || c.logPanel.create({ runId: detail.run_id, open: false });
@@ -398,7 +417,7 @@ export function mount(view, ctx) {
     }
     const offLive = ctx.store.on("live", state => {
         const run = state?.run;
-        if (alive && run && selectedDay === localDay(run.started_at) && details.has(run.run_id)) { details.set(run.run_id, run); renderDay(); renderDates(); }
+        if (alive && run && selectedDay === localDay(run.started_at) && details.has(run.run_id)) { if (accountId) { navigate(params, true); } else { details.set(run.run_id, run); renderDay(); renderDates(); } }
     });
     const offFinish = bridge.on("run.finished", () => { if (alive) navigate(params, true); });
     const resize = () => { if (alive) navigate(params); };

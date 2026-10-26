@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "別のアカウントを追加する前に、既存のアカウントを確認してください。", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "確認待ちのアカウントを先に確認またはキャンセルしてください。", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "確認の有効期限が切れました。もう一度サインインしてアカウントを確認してください。", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "アカウントの確認を保存できませんでした。もう一度お試しください。", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "Microsoft アカウントの名前を読み取れませんでした。もう一度サインインしてください。", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "別の Microsoft アカウントでサインインしています。確認済みのアカウントでサインインしてください。", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "アカウントの移動が完了していません。もう一度アカウントの追加をお試しください。", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "[アカウント] での確認が必要なため、このアカウントをスキップしました。", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "Microsoft の名前を確認できなかったため、このアカウントをスキップしました。", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "別の Microsoft アカウントでサインインしているため、このアカウントをスキップしました。", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "{account} で Microsoft の更新された利用規約への同意が必要です。[もう一度サインイン] を選び、開いたウィンドウで規約に同意してから閉じてください。", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "{account} は Microsoft からサインアウトしています。[アカウント] を開き、[もう一度サインイン] を選んでください。", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "Rewards ページが空白のままで、情報を読み取れませんでした。次の確認時にもう一度試します。", "src": "c412ce65"},

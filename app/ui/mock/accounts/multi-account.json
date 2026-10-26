@@ -1,0 +1,42 @@
+{
+  "synthetic": true,
+  "note": "F108 synthetic two-account scenario. Identity-skipped Riley earned a known zero; Jamie earned 40 and the run total is 40. One invited friend remains a local note. Scenario behavior exists only in mock-bridge.",
+  "scenario": "multi-account",
+  "methods": {
+    "list_accounts": {"ok":true,"data":{"accounts":[
+      {"id":"account-1","label":"Jamie","dir":"C:\\Synthetic\\account-1","paused":false,"is_root":false,"signed_in":true,"balance":12340,"balance_at":"2026-10-26T15:32:00Z","last_run_at":"2026-10-26T15:30:00Z","last_result":"ok","email":"jamie@example.invalid","name":"Jamie Synthetic","picture_rev":null,"identity_status":"confirmed","identity_confirmed_at":"2026-10-26T15:20:00Z","identity_last_status":"match","identity_checked_at":"2026-10-26T15:32:00Z"},
+      {"id":"account-2","label":"Riley","dir":"C:\\Synthetic\\account-2","paused":false,"is_root":false,"signed_in":true,"balance":null,"balance_at":null,"last_run_at":"2026-10-26T15:30:00Z","last_result":"skipped","email":"riley@example.invalid","name":"Riley Synthetic","picture_rev":null,"identity_status":"confirmed","identity_confirmed_at":"2026-10-26T15:22:00Z","identity_last_status":"mismatch","identity_checked_at":"2026-10-26T15:32:00Z"}
+    ]}},
+    "get_invited_friends":{"ok":true,"data":{"invited_friends":[{"id":"friend-00000000000000000000000000000108","name":"Synthetic Friend","email":"friend@example.invalid","added_at":"2026-10-26T15:00:00Z"}]}},
+    "add_account":{"ok":true,"data":{"account_id":"account-3","signin":{"account_id":"account-3","state":"starting","error_code":null,"message_key":"accounts.signin.starting","detail":null,"at":"2026-10-26T15:33:00Z"}}},
+    "begin_enrollment":{"ok":true,"data":{"signin":{"account_id":"account-1","state":"starting","error_code":null,"message_key":"accounts.signin.starting","detail":null,"at":"2026-10-26T15:33:00Z"}}},
+    "get_signin_status":{"ok":true,"data":{"account_id":"account-3","state":"awaiting_confirmation","error_code":null,"message_key":"accounts.signin.awaiting_confirmation","detail":null,"at":"2026-10-26T15:34:00Z"}},
+    "get_enrollment_status":{"ok":true,"data":{"account_id":"account-3","state":"awaiting_confirmation","observed_name":"Morgan Synthetic","confirmation_token":"00000000000000000000000000000108","observed_at":"2026-10-26T15:34:00Z","same_name_limit":true}},
+    "confirm_enrollment":{"ok":true,"data":{"account_id":"account-3","identity_status":"confirmed","confirmed_at":"2026-10-26T15:35:00Z","managed":true,"same_name_limit":true}},
+    "cancel_signin":{"ok":true,"data":{}},
+    "get_run":{"ok":true,"data":{
+      "run_id":"synthetic-multi-identity","trigger":"app","kind":"run","started_at":"2026-10-26T15:30:00Z","ended_at":"2026-10-26T15:32:00Z","duration_ms":120000,"active":false,"result":"partial","result_key":"errors.run.partial","points_earned":40,"stop_requested":false,"deferred":null,"warnings":[],"log_size":0,
+      "accounts":[
+        {"account_id":"account-1","label":"Jamie","status":"done","decision":null,"state_before":null,"state_after":null,"points_now":12340,"points_earned":40,"search":null,"error":null,"tasks":[
+          {"task":"daily_set","name_key":"common.task.daily_set","status":"ok","reason_key":null,"detail":null,"progress":null,"points_before":12300,"points_after":12330,"points":30,"duration_ms":30000},
+          {"task":"explore_on_bing","name_key":"common.task.explore_on_bing","status":"ok","reason_key":null,"detail":null,"progress":null,"points_before":12330,"points_after":12340,"points":10,"duration_ms":10000},
+          {"task":"visual_search","name_key":"common.task.visual_search","status":"skip","reason_key":"errors.task.not_available","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"misc_cards","name_key":"common.task.misc_cards","status":"off","reason_key":"errors.task.turned_off","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"quests","name_key":"common.task.quests","status":"off","reason_key":"errors.task.turned_off","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"searches","name_key":"common.task.searches","status":"off","reason_key":"errors.task.turned_off","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"bonus","name_key":"common.task.bonus","status":"off","reason_key":"errors.task.turned_off","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null}
+        ]},
+        {"account_id":"account-2","label":"Riley","status":"skipped","decision":null,"state_before":null,"state_after":null,"points_now":null,"points_earned":0,"search":null,"error":{"code":"identity_mismatch","message_key":"errors.run.failed","detail":null},"tasks":[
+          {"task":"daily_set","name_key":"common.task.daily_set","status":"not_run","reason_key":"errors.task.not_run","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"explore_on_bing","name_key":"common.task.explore_on_bing","status":"not_run","reason_key":"errors.task.not_run","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"visual_search","name_key":"common.task.visual_search","status":"not_run","reason_key":"errors.task.not_run","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"misc_cards","name_key":"common.task.misc_cards","status":"not_run","reason_key":"errors.task.not_run","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"quests","name_key":"common.task.quests","status":"not_run","reason_key":"errors.task.not_run","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"searches","name_key":"common.task.searches","status":"not_run","reason_key":"errors.task.not_run","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null},
+          {"task":"bonus","name_key":"common.task.bonus","status":"not_run","reason_key":"errors.task.not_run","detail":null,"progress":null,"points_before":null,"points_after":null,"points":null,"duration_ms":null}
+        ]}
+      ]
+    }}
+  },
+  "pushes": []
+}

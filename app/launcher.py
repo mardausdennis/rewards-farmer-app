@@ -95,9 +95,11 @@ def main(argv=None):
 			accounts = [part.strip() for part in args[2].split(",")]
 		return supervise(kind, accounts) if accounts is not None else supervise(kind)
 	if token == "--signin":
-		if len(args) not in (2, 3) or (len(args) == 3 and args[2] != "--new"):
+		if len(args) < 2 or len(args) > 4 or len(set(args[2:])) != len(args[2:]) or any(value not in ("--new", "--enroll") for value in args[2:]):
 			return 2
 		from rfapp.signin import run
+		if "--enroll" in args:
+			return run(args[1], new="--new" in args, enroll=True)
 		return run(args[1], new="--new" in args)
 	if token == "--version" and len(args) == 1:
 		from rfapp import __version__

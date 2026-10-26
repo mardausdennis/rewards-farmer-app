@@ -63,7 +63,7 @@ class BridgeTests(unittest.TestCase):
 		self.addCleanup(self.api._close)
 
 	def test_exact_methods_one_object_and_no_public_state(self):
-		expected = {"ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_invited_friends", "save_invited_friend", "remove_invited_friend", "get_referral_info", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "cancel_signin", "rename_account", "set_account_paused", "remove_account"}
+		expected = {"ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_invited_friends", "save_invited_friend", "remove_invited_friend", "get_referral_info", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "begin_enrollment", "get_enrollment_status", "confirm_enrollment", "cancel_signin", "rename_account", "set_account_paused", "remove_account"}
 		public = {name for name in dir(self.api) if not name.startswith("_")}
 		self.assertEqual(public, expected)
 		for name in public:
@@ -98,6 +98,20 @@ class BridgeTests(unittest.TestCase):
 				self.assertEqual(self.api.get_account_picture(request)["error"]["code"], "bad_request")
 		self.assertEqual(self.api.get_account_picture({"account_id": "account-999"})["error"]["code"], "accounts.unknown")
 		backend.assert_not_called()
+
+	def test_account_filters_pass_to_data_owner_without_restricting_historical_ids(self):
+		self.p["history_aliases"] = [{"from": "@root", "to": "account-9", "before": "2026-10-25T10:00:00Z"}]
+		self.api.get_history({"account_id": "account-9"})
+		self.assertEqual(self.deps["runs"].history.call_args.kwargs["account_id"], "account-9")
+		self.assertEqual(self.deps["runs"].history.call_args.kwargs["history_aliases"], self.p["history_aliases"])
+		self.api.get_run({"run_id": RUN_ID, "account_id": "account-9"})
+		self.assertEqual(self.deps["runs"].load_run.call_args.kwargs["account_id"], "account-9")
+		self.assertEqual(self.deps["runs"].load_run.call_args.kwargs["history_aliases"], self.p["history_aliases"])
+		self.api.get_overview({"account_id": "account-1"})
+		self.assertEqual(self.deps["runs"].overview.call_args.kwargs["account_id"], "account-1")
+		self.assertEqual(self.deps["runs"].overview.call_args.args[1], self.p)
+		for method, request in (("get_history", {"account_id": "../bad"}), ("get_run", {"run_id": RUN_ID, "account_id": []}), ("get_overview", {"account_id": 3})):
+			self.assertEqual(getattr(self.api, method)(request)["error"]["code"], "bad_request")
 
 	def test_bad_field_types_and_ranges_return_bad_request(self):
 		cases = (("start_run", {"account_ids": "account-1"}), ("start_run", {"account_ids": ["account-1", "account-1"]}), ("start_run", {"account_ids": [None]}), ("start_run", {"check_only": 1}), ("get_run_log", {"run_id": RUN_ID, "offset": -1}), ("get_run_log", {"run_id": RUN_ID, "max_bytes": True}), ("set_goal", {"account_id": "missing", "target": False}), ("rename_account", {"account_id": "missing", "label": "bad\nlabel"}), ("rename_account", {"account_id": "account-1", "label": " "}), ("set_account_paused", {"account_id": "missing", "paused": "true"}), ("remove_account", {"account_id": "missing", "delete_data": 1}), ("add_account", {"confirm_migration": "yes"}), ("check_updates", {"force": 1}), ("pick_path", {"kind": []}), ("save_settings", {"changes": []}), ("dismiss_update", {"version": "v0.2.0"}), ("list_ollama_models", {"base_url": "http://[bad"}))
@@ -159,7 +173,7 @@ class BridgeTests(unittest.TestCase):
 
 	def test_history_request_validation(self):
 		self.assertTrue(self.api.get_history({})["ok"])
-		self.deps["runs"].history.assert_called_once_with(limit=50, before=None, include_checks=True, labels={}, user_data_dir=str(self.home / "profiles"))
+		self.deps["runs"].history.assert_called_once_with(limit=50, before=None, include_checks=True, labels={}, user_data_dir=str(self.home / "profiles"), history_aliases=[])
 		for request in ({"limit": True}, {"limit": 0}, {"limit": 201}, {"before": "../bad"}, {"include_checks": "yes"}):
 			self.assertEqual(self.api.get_history(request)["error"]["code"], "bad_request")
 

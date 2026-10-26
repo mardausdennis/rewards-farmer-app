@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "Bestätige die vorhandenen Konten, bevor du ein weiteres hinzufügst.", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "Bestätige zuerst das wartende Konto oder brich die Bestätigung ab.", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "Diese Bestätigung ist abgelaufen. Melde dich erneut an, um das Konto zu bestätigen.", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "Die Kontobestätigung konnte nicht gespeichert werden. Versuche es erneut.", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "Der Name des Microsoft-Kontos konnte nicht gelesen werden. Melde dich erneut an.", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "Ein anderes Microsoft-Konto ist angemeldet. Melde dich mit dem bestätigten Konto an.", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "Das Konto wurde noch nicht fertig verschoben. Versuche erneut, es hinzuzufügen.", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "Dieses Konto wurde übersprungen, weil es unter „Konten“ bestätigt werden muss.", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "Dieses Konto wurde übersprungen, weil sein Microsoft-Name nicht geprüft werden konnte.", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "Dieses Konto wurde übersprungen, weil ein anderes Microsoft-Konto angemeldet ist.", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "Für {account} verlangt Microsoft die Zustimmung zu neuen Bedingungen. Wähle „Erneut anmelden“, akzeptiere die Bedingungen im neuen Fenster und schließe es dann.", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "{account} ist bei Microsoft abgemeldet. Öffne „Konten“ und wähle „Erneut anmelden“.", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "Die Rewards-Seite blieb leer und konnte nicht gelesen werden. Die nächste Prüfung versucht es erneut.", "src": "c412ce65"},

@@ -178,20 +178,21 @@ class Bridge:
 			raise _BridgeError("accounts.unknown")
 		return account_id
 
-	def _run(self, run_id):
+	def _run(self, run_id, account_id=None):
 		_run_id(run_id)
 		if not (paths.runs_dir() / (run_id + ".jsonl")).is_file():
 			raise _BridgeError("run.unknown")
 		try:
-			return self._module("runs").load_run(run_id, self._module("prefs").load().get("account_labels", {}), str(self._module("settings").user_data_dir()))
+			kwargs = {"account_id": account_id} if account_id is not None else {}
+			return self._module("runs").load_run(run_id, self._module("prefs").load().get("account_labels", {}), str(self._module("settings").user_data_dir()), **kwargs)
 		except FileNotFoundError as exc:
 			raise _BridgeError("run.unknown") from exc
 
-	def _overview(self):
+	def _overview(self, account_id=None):
 		values = self._module("settings").load()
 		self._remember_secrets(values)
 		p = self._module("prefs").load()
-		result = self._module("runs").overview(values, p, datetime.now(timezone.utc))
+		result = self._module("runs").overview(values, p, datetime.now(timezone.utc), **({"account_id": account_id} if account_id is not None else {}))
 		result["schedule"] = self._module("schedule").status()
 		result["generated_at"] = _utc()
 		result["signin_active"] = self._signin_active()
@@ -203,7 +204,7 @@ class Bridge:
 			try:
 				account_id = json.loads(read_file(status_file))["account_id"]
 				status = admin.get_signin_status(account_id)
-				if status["state"] in ("starting", "waiting", "verifying"):
+				if status["state"] in ("starting", "waiting", "verifying", "awaiting_confirmation"):
 					return {"account_id": account_id}
 			except (OSError, ValueError, KeyError):
 				_log.warning("Unreadable sign-in status: %s", status_file.name)
@@ -254,9 +255,9 @@ class Bridge:
 		os.startfile(url)
 		return {}
 
-	@_method()
+	@_method(optional=("account_id",))
 	def get_overview(self, request):
-		return self._overview()
+		return self._overview(_account(request["account_id"]) if request.get("account_id") is not None else None)
 
 	@_method(optional=("range", "account_id", "week_start"))
 	def get_stats(self, request):
@@ -275,16 +276,26 @@ class Bridge:
 		log = self._read_log(run_id, max(0, size - 65536), 65536)
 		return {"run": detail, "log": {"text": log["text"], "next_offset": log["next_offset"]}}
 
-	@_method(optional=("limit", "before", "include_checks"))
+	@_method(optional=("limit", "before", "include_checks", "account_id"))
 	def get_history(self, request):
 		limit = _integer(request.get("limit", 50), 1, 200)
 		before = _run_id(request["before"]) if "before" in request else None
 		include_checks = _boolean(request.get("include_checks", True))
-		return self._module("runs").history(limit=limit, before=before, include_checks=include_checks, labels=self._module("prefs").load().get("account_labels", {}), user_data_dir=str(self._module("settings").user_data_dir()))
+		selected = _account(request["account_id"]) if request.get("account_id") is not None else None
+		p = self._module("prefs").load()
+		return self._module("runs").history(limit=limit, before=before, include_checks=include_checks, labels=p.get("account_labels", {}), user_data_dir=str(self._module("settings").user_data_dir()), history_aliases=p.get("history_aliases", []), **({"account_id": selected} if selected is not None else {}))
 
-	@_method(required=("run_id",))
+	@_method(required=("run_id",), optional=("account_id",))
 	def get_run(self, request):
-		return self._run(request["run_id"])
+		selected = _account(request["account_id"]) if request.get("account_id") is not None else None
+		run_id = _run_id(request["run_id"])
+		if not (paths.runs_dir() / (run_id + ".jsonl")).is_file():
+			raise _BridgeError("run.unknown")
+		p = self._module("prefs").load()
+		try:
+			return self._module("runs").load_run(run_id, p.get("account_labels", {}), str(self._module("settings").user_data_dir()), history_aliases=p.get("history_aliases", []), **({"account_id": selected} if selected is not None else {}))
+		except FileNotFoundError as exc:
+			raise _BridgeError("run.unknown") from exc
 
 	def _read_log(self, run_id, offset, max_bytes):
 		path = paths.runs_dir() / (run_id + ".log")
@@ -592,6 +603,23 @@ class Bridge:
 	@_method(required=("account_id",))
 	def get_signin_status(self, request):
 		return self._module("accounts_admin").get_signin_status(_account(request["account_id"]))
+
+	@_method(required=("account_id",))
+	def begin_enrollment(self, request):
+		with self._settings_lock:
+			return self._module("accounts_admin").begin_enrollment(self._known_account(request["account_id"]))
+
+	@_method(required=("account_id",))
+	def get_enrollment_status(self, request):
+		return self._module("accounts_admin").get_enrollment_status(_account(request["account_id"]))
+
+	@_method(required=("account_id", "confirmation_token", "confirmed"))
+	def confirm_enrollment(self, request):
+		with self._settings_lock:
+			result = self._module("accounts_admin").confirm_enrollment(_account(request["account_id"]), _string(request["confirmation_token"]), _boolean(request["confirmed"]))
+		self._context_changed()
+		self._push("overview.changed", {})
+		return result
 
 	@_method(required=("account_id",))
 	def cancel_signin(self, request):

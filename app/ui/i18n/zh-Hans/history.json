@@ -1,6 +1,12 @@
 {
   "namespace": "history",
   "messages": {
+    "history.account": {"text": "帐户", "src": "fb2a1c8f"},
+    "history.account.all": {"text": "所有帐户", "src": "e1cce800"},
+    "history.account.ran": {"text": "已运行", "src": "2b3ec280"},
+    "history.account.skipped": {"text": "已跳过", "src": "55a21fdf"},
+    "history.account.failed": {"text": "失败", "src": "66daff25"},
+    "history.account.unknown": {"text": "未知", "src": "aa6d855a"},
     "history.title": {"text": "历史记录", "src": "ee7ea2a7"},
     "history.loading": {"text": "正在打开历史记录", "src": "1b51a0b8"},
     "history.checks.latest": {"text": "查看最近一次检查", "src": "240765be"},

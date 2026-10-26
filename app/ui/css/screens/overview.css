@@ -1,4 +1,11 @@
 .overview-screen { overflow-wrap: anywhere; }
+.overview-account-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); }
+.overview-account-totals .stat { min-inline-size: 0; }
+.overview-account-totals .stat-value { font-size: var(--fs-5); }
+.overview-account-summaries { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: var(--sp-4); }
+.overview-account-summary { border-block-start: 1px solid var(--c-border); margin-block-start: var(--sp-4); padding-block-start: var(--sp-4); display: grid; gap: var(--sp-3); min-inline-size: 0; }
+.overview-account-summary > h2 { font-size: var(--fs-4); }
+.overview-account-summary > .stat .stat-value { font-size: var(--fs-5); }
 .overview-screen .overview-spread.is-known-only { grid-template-columns: minmax(0, 1fr); }
 .overview-screen .overview-balance-captured { margin-block-start: var(--sp-2); font-size: var(--fs-2); }
 .overview-screen .screen-header > div { min-inline-size: 0; }

@@ -267,6 +267,20 @@ class ReferralHookTests(unittest.TestCase):
 		self.referral.assert_not_called()
 		self.assertFalse((self.home / "referral.json").exists())
 
+	def test_referral_hook_leaves_refer_page_after_read_on_success_or_failure(self):
+		for failure in (False, True):
+			order = []
+			with patch.object(referrals, "read_referral_page", side_effect=lambda driver: order.append("read") or referrals.ReferralState(unreadable="read_failed") if failure else order.append("read") or referrals.ReferralState(LINK, True)), patch.object(referrals, "save_referral_state"), patch.object(self.driver, "get", side_effect=lambda url: order.append(url)):
+				main._record_referrals(self.driver, main.accounts.Account("one", "synthetic", "Default"))
+			self.assertEqual(order, ["read", "https://rewards.bing.com/"])
+
+	def test_return_navigation_error_does_not_fail_run_and_is_correlated(self):
+		with patch.object(self.driver, "get", side_effect=RuntimeError(LINK)):
+			self.assertEqual(main.main(True, main.RunPlan(read_state=True)), 0)
+		self.assertEqual(self.events()[-1]["result"], "ok")
+		self.assertTrue(any(event.get("code") == "referral_return_failed" for event in self.events()))
+		self.assertNotIn(LINK, json.dumps(self.events()))
+
 	def test_root_profile_uses_canonical_root_storage_and_event_identity(self):
 		with patch.dict(os.environ, {"REWARDS_ACCOUNTS": ""}):
 			self.assertEqual(main.main(True, main.RunPlan(read_state=True)), 0)

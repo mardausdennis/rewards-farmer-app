@@ -60,6 +60,8 @@ class DiagnosticsTests(unittest.TestCase):
 			(home / "app-prefs.json").write_text(json.dumps({"v": 1, "invited_friends": [{"id": "friend-local", "name": friend_name, "email": friend_email}]}), encoding="utf-8")
 			link = "https://rewards.bing.com/refer?code=SYNTHETIC_PRIVATE"
 			(home / "referral.json").write_text(json.dumps({"link": link}), encoding="utf-8")
+			(home / "account-identities.json").write_text(json.dumps({"bindings": {"expected_name_hash": "private-binding-hash"}, "pending": {"observed_name": "Private Pending Name"}}), encoding="utf-8")
+			(home / "account-migration.json").write_text(json.dumps({"before": {".env": "private-backup"}}), encoding="utf-8")
 			(home / ".env").write_text("OPENROUTER_API_KEY=secret\nLOCAL_LLM_API_KEY=local\nREWARDS_WEBHOOK_URL=https://discord.com/token\nQUERY_SOURCE=trends\n", encoding="utf-8")
 			(home / "index.json").write_text('{"locales":[{"code":"en"}]}', encoding="utf-8")
 			paths = SimpleNamespace(resource=lambda *parts: home / "index.json", runs_dir=lambda: runs, data_home=lambda: home, env_path=lambda: home / ".env", prefs_path=lambda: home / "app-prefs.json", task_name=lambda: "RewardsFarmerApp_test0000", is_frozen=lambda: False)
@@ -77,8 +79,12 @@ class DiagnosticsTests(unittest.TestCase):
 				self.assertFalse(any("Cookies" in name or "data-dir" in name or "signin" in name for name in names))
 				self.assertFalse(any("Local State" in name for name in names))
 				self.assertNotIn("referral.json", names)
+				self.assertNotIn("account-identities.json", names)
+				self.assertNotIn("account-migration.json", names)
 				self.assertNotIn("invited_friends", json.loads(archive.read("app-prefs.json")))
 				for name in names:
+					self.assertNotIn(b"private-binding-hash", archive.read(name), name)
+					self.assertNotIn(b"Private Pending Name", archive.read(name), name)
 					self.assertNotIn(friend_name.encode(), archive.read(name), name)
 					self.assertNotIn(friend_email.encode(), archive.read(name), name)
 					self.assertNotIn(link.encode(), archive.read(name), name)

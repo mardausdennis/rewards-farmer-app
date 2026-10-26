@@ -1,10 +1,13 @@
 import _bootstrap  # noqa: F401
 
 import json
+import os
 import base64
 import struct
 import re
 import tempfile
+import subprocess
+import shutil
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -40,6 +43,9 @@ SUCCESS_KEYS = {
 	"save_invited_friend": {"friend"},
 	"remove_invited_friend": {"invited_friends"},
 	"get_referral_info": {"link", "link_found", "referrals", "friends", "read_at", "unreadable"},
+	"begin_enrollment": {"signin"},
+	"get_enrollment_status": {"account_id", "state", "observed_name", "confirmation_token", "observed_at", "same_name_limit"},
+	"confirm_enrollment": {"account_id", "identity_status", "confirmed_at", "managed", "same_name_limit"},
 	"get_account_picture": {"account_id", "rev", "data_url"},
 	"add_account": {"account_id", "signin"},
 	"sign_in_again": {"signin"},
@@ -58,6 +64,19 @@ ACCOUNT_KEYS = {"id", "label", "dir", "paused", "is_root", "signed_in", "balance
 
 
 def overview_streaks_problems(value):
+	if "streaks_by_account" in value:
+		mapping = value["streaks_by_account"]
+		problems = []
+		if value.get("streaks") is not None:
+			problems.append("overview.streaks: aggregate multi-account capture must be null")
+		if not isinstance(mapping, dict):
+			return problems + ["overview.streaks_by_account: expected an account map"]
+		for account_id, capture in mapping.items():
+			if capture is not None:
+				problems.extend(overview_streaks_problems({"streaks": capture}))
+				if isinstance(capture, dict) and capture.get("account_id") != account_id:
+					problems.append("overview.streaks_by_account: capture belongs to another account")
+		return problems
 	if "streaks" not in value:
 		return ["overview.streaks: missing F78 field"]
 	streaks = value["streaks"]
@@ -402,6 +421,68 @@ def validate_deferred_records(mock_root):
 
 
 class MockShapeTests(unittest.TestCase):
+	def test_f108_dynamic_multi_account_shapes_and_unknown_totals(self):
+		node = shutil.which("node")
+		self.assertIsNotNone(node, "Node is required for the dynamic mock contract")
+		program = r"""
+		 import fs from 'node:fs/promises';import {pathToFileURL} from 'node:url';
+		 const root=process.argv[1],files={};
+		 for(const name of ['shell/defaults.json','accounts/multi-account.json'])files[name]=JSON.parse(await fs.readFile(root+'/mock/'+name,'utf8'));
+		 globalThis.window={location:{search:'?mock=accounts/multi-account'},addEventListener(){},dispatchEvent(){}};
+		 globalThis.fetch=async url=>({ok:true,json:async()=>structuredClone(files[String(url).split('/mock/')[1]])});
+		 const mock=await import(pathToFileURL(root+'/js/mock-bridge.js'));await mock.install();
+		 const api=window.pywebview.api,result={};
+		 for(const method of ['get_overview','get_stats','get_history','get_run']){
+		  result[method]=[];for(const account_id of [null,'account-1','account-2'])result[method].push(await api[method]({...(account_id?{account_id}:{}),run_id:'synthetic-multi-identity',range:30}));
+		 }
+		 result.list_accounts=await api.list_accounts({});console.log(JSON.stringify(result));
+		 """
+		result = subprocess.run([node, "--input-type=module", "-e", program, str(MOCK_ROOT.parent)], capture_output=True, text=True, timeout=20, check=True)
+		answers = json.loads(result.stdout)
+		for response in answers["get_overview"]:
+			self.assertEqual([], overview_streaks_problems(response["data"]))
+		aggregate = answers["get_overview"][0]["data"]
+		self.assertEqual({"account-1", "account-2"}, set(aggregate["streaks_by_account"]))
+		self.assertIsNone(aggregate["totals"]["balance"])
+		self.assertIsNone(aggregate["streaks_by_account"]["account-2"])
+		for response in answers["get_stats"]:
+			self.assertEqual([], stats_problems(response["data"]))
+		for response in answers["get_run"]:
+			self.assertEqual([], run_task_points_problems(response["data"]))
+		for index, account_id in ((1, "account-1"), (2, "account-2")):
+			for method in ("get_history", "get_run"):
+				data = answers[method][index]["data"]
+				run = data["runs"][0] if method == "get_history" else data
+				self.assertEqual([account_id], [account["account_id"] for account in run["accounts"]])
+				self.assertNotIn("account_id", run)
+		self.assertEqual(40, answers["get_run"][0]["data"]["points_earned"])
+		self.assertEqual(40, answers["get_history"][0]["data"]["runs"][0]["points_earned"])
+		self.assertEqual([40, 0], [account["points_earned"] for account in answers["get_run"][0]["data"]["accounts"]])
+		self.assertEqual(0, answers["get_run"][2]["data"]["points_earned"])
+		self.assertEqual(0, answers["get_history"][2]["data"]["runs"][0]["points_earned"])
+		self.assertEqual(0, answers["get_run"][2]["data"]["accounts"][0]["points_earned"])
+		self.assertEqual("skipped", answers["get_run"][2]["data"]["result"])
+		self.assertEqual("check", answers["get_run"][2]["data"]["kind"])
+		self.assertEqual("account-2", answers["get_stats"][2]["data"]["account_id"])
+		self.assertIsNone(answers["get_stats"][2]["data"]["totals"]["earned"])
+		wrong = json.loads(json.dumps(aggregate))
+		wrong["streaks_by_account"]["account-1"]["account_id"] = "account-2"
+		self.assertTrue(overview_streaks_problems(wrong))
+
+	def test_f108_enrollment_fixture_matches_confirmed_backend_shapes(self):
+		import identity
+		from rfapp import accounts_admin, paths
+		fixture = json.loads((MOCK_ROOT / "accounts/enrollment.json").read_text(encoding="utf-8"))["methods"]
+		with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {"REWARDS_FARMER_DATA_HOME": folder}):
+			identity.stage_enrollment("account-1", "Synthetic Person", new=False, directory=folder)
+			status = accounts_admin.get_enrollment_status("account-1")
+			self.assertEqual(set(status), set(fixture["get_enrollment_status"]["data"]))
+			self.assertTrue(status["same_name_limit"])
+			self.assertEqual(status["observed_name"], "Synthetic Person")
+		row = fixture["list_accounts"]["data"]["accounts"][0]
+		self.assertTrue({"identity_status", "identity_confirmed_at", "identity_last_status", "identity_checked_at"} <= set(row))
+		self.assertEqual(row["identity_status"], "confirmed")
+
 	def test_f103_invitation_shapes_match_real_producers(self):
 		import os
 		from rfapp import prefs
@@ -548,7 +629,13 @@ class MockShapeTests(unittest.TestCase):
 			for kind, location, value in named_records(fixture, path.relative_to(MOCK_ROOT).as_posix()):
 				if kind == "account":
 					with self.subTest(location=location):
-						self.assertEqual(ACCOUNT_KEYS, set(value))
+						identity_keys = {"identity_status", "identity_confirmed_at", "identity_last_status", "identity_checked_at"}
+						# Legacy scenarios retain their original shape; the enrollment
+						# scenario exercises the complete additive identity contract.
+						self.assertIn(set(value), (ACCOUNT_KEYS, ACCOUNT_KEYS | identity_keys))
+						if identity_keys & set(value):
+							self.assertTrue(identity_keys <= set(value))
+							self.assertIn(value["identity_status"], ("confirmed", "unconfirmed", "unknown"))
 						self.assertTrue(value["picture_rev"] is None or isinstance(value["picture_rev"], str))
 					accounts += 1
 			for _, entry in successful_answers(fixture.get("methods", {}).get("get_account_picture")):

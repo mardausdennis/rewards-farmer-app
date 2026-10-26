@@ -160,6 +160,46 @@ class HistorySourceTests(unittest.TestCase):
 
 @unittest.skipUnless(_enabled,"Run through guarded parent UI overlay")
 class HistoryTests(unittest.TestCase):
+	def test_f108_scoped_identity_outcomes_and_single_pin(self):
+		self.open();self.js("assert(!document.getElementById('history-account'),'F108 single selector absent')")
+		_harness.open('#/history/synthetic-multi-identity','accounts/multi-account').wait_ready()
+		self.js("""
+		 await wait(()=>document.querySelector('[data-outcome-account=account-2]'));
+		 assert(document.getElementById('history-account').value==='all','F108 default all');
+		 assert(document.querySelector('[data-outcome-account=account-1]').dataset.outcome==='ran','F108 other account ran');
+		 const skipped=document.querySelector('[data-outcome-account=account-2]');assert(skipped.dataset.outcome==='skipped'&&skipped.textContent.includes('different Microsoft account'),'F108 identity reason on row');
+		 assert(document.querySelector('.history-run-points').textContent===i.t('common.points.total',{count:40})&&!document.querySelector('.history-total-unknown'),'F108 known 40 plus skipped zero totals 40');
+		 assert(skipped.querySelector('.tabular').textContent===i.t('common.points.total',{count:0}),'F108 skipped account has known zero points');
+		 assert(document.querySelector('.history-no-points:not([open])')&&!document.querySelector('.history-task-list [data-status=not_run]'),'F108 skipped zero attempts stay in existing folded section');
+		 const calls=[],api=window.pywebview.api;
+		 for(const method of ['get_history','get_run']){const original=api[method];api[method]=async request=>{calls.push({method,request});return original(request)}}
+		 let select=document.getElementById('history-account');select.value='account-2';select.dispatchEvent(new Event('change'));
+		 await wait(()=>document.querySelector('.history-check-group'));document.querySelector('.history-check-group').open=true;
+		 await wait(()=>document.querySelector('[data-outcome-account=account-2]')&&!document.querySelector('[data-outcome-account=account-1]'));
+		 assert(document.querySelector('.history-check-group').open&&document.querySelector('.history-run-points').textContent===i.t('common.points.total',{count:0}),'F108 scoped skipped account keeps check folding and known zero');
+		 assert(calls.some(call=>call.method==='get_history'&&call.request.account_id==='account-2')&&calls.some(call=>call.method==='get_run'&&call.request.account_id==='account-2'),'F108 both readers scoped');
+		 select=document.getElementById('history-account');select.value='account-1';select.dispatchEvent(new Event('change'));
+		 await wait(()=>document.querySelector('[data-outcome-account=account-1]')&&!document.querySelector('[data-outcome-account=account-2]'));
+		 assert(document.querySelector('[data-outcome-account=account-1]').dataset.outcome==='ran'&&document.querySelector('.history-run-points').textContent===i.t('common.points.total',{count:40}),'F108 independent outcome and earned 40');
+		 """)
+		self.assertEqual([], _harness.errors())
+
+	def test_f108_history_captures(self):
+		_harness.open('#/history/synthetic-multi-identity','accounts/multi-account').wait_ready()
+		self.js("""
+		 await wait(()=>document.querySelector('[data-outcome-account=account-2]'));
+		 const original=window.pywebview.api.get_run;window.pywebview.api.get_run=async request=>{const response=await original(request);response.data.accounts[1].error={code:'identity_unknown',message_key:'errors.run.failed',detail:null};return response};
+		 document.querySelector('.screen-header button').click();await wait(()=>document.querySelector('[data-outcome-account=account-2] .reason')?.textContent.includes('could not be checked'));
+		 assert(document.querySelector('[data-outcome-account=account-1]').dataset.outcome==='ran'&&document.querySelector('[data-outcome-account=account-2]').dataset.outcome==='skipped','F108 unknown identity remains account-local');
+		 assert(document.querySelector('.history-run-points').textContent===i.t('common.points.total',{count:40})&&document.querySelector('[data-outcome-account=account-2] .tabular').textContent===i.t('common.points.total',{count:0}),'F108 unreadable identity is still skipped before earning, not an unknown contribution');
+		""")
+		for theme in ('light','dark'):
+			for width,height in ((1280,800),(860,600)):
+				_harness.viewport(width,height);_harness.open('#/history/synthetic-multi-identity','accounts/multi-account',theme).wait_ready()
+				self.js("await wait(()=>document.querySelector('[data-outcome-account=account-2]'));assert(document.documentElement.scrollWidth<=innerWidth+1,'F108 history fits');assert([...document.querySelectorAll('.history-account>div')].every(node=>!node.querySelector('h2')||node.children.length>1),'F108 no empty account headings');assert(document.querySelector('.history-run-points').textContent===i.t('common.points.total',{count:40})&&document.querySelector('[data-outcome-account=account-2] .tabular').textContent===i.t('common.points.total',{count:0}),'rev1 history capture shows known sum and skipped zero')")
+				if os.environ.get('RF_F108_CAPTURE'):_harness.driver.save_screenshot(str(Path(os.environ['RF_F108_CAPTURE'])/f'history-{theme}-{width}x{height}.png'))
+		_harness.viewport(1280,800)
+
 	# F81 replaces F79's flat-list geometry. Data, diagnostics and log invariants
 	# stay covered below on the day-page renderer instead of stale row selectors.
 	def open(self,route="#/history",fixture="week",theme="dark",lang="en",region="en-AT"):

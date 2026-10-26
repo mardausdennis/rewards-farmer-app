@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "Confirm the existing accounts before adding another.", "note": "Enrollment is required before multi-account registration."},
+    "errors.app.accounts_enrollment_pending": {"text": "Confirm or cancel the account waiting for confirmation first.", "note": "A pending enrollment must finish before another account is added."},
+    "errors.app.accounts_enrollment_expired": {"text": "This confirmation expired. Sign in again to confirm the account.", "note": "An expired token is not a new confirmation."},
+    "errors.app.accounts_enrollment_save_failed": {"text": "The account confirmation could not be saved. Try again.", "note": "Failed persistence does not register the new account."},
+    "errors.app.accounts_identity_unreadable": {"text": "The Microsoft account name could not be read. Sign in again.", "note": "Unreadable identity prevents enrollment."},
+    "errors.app.accounts_identity_mismatch": {"text": "A different Microsoft account is signed in. Sign in with the confirmed account.", "note": "Never replace an existing binding with another person's identity."},
+    "errors.app.accounts_migration_pending": {"text": "The account move has not finished. Try adding the account again.", "note": "An interrupted migration must finish before another registration."},
+    "errors.browser.enrollment_required": {"text": "This account was skipped because it needs confirmation in Accounts.", "note": "Account-local identity gate. Other accounts may still run."},
+    "errors.browser.identity_unknown": {"text": "This account was skipped because its Microsoft name could not be checked.", "note": "Unknown identity is not a match and is not zero earned points."},
+    "errors.browser.accounts.identity_mismatch": {"text": "This account was skipped because a different Microsoft account is signed in.", "note": "Matches the backend's accounts.identity_mismatch browser code. Other accounts may still run."},
     "errors.state.terms_of_use": {"text": "Microsoft wants {account} to accept updated terms. Choose Sign in again, accept the terms in the window that opens, then close it.", "note": "Unreadable-state notice on Overview or run details. account is the account label chosen by the user or the localized default label. Keep the recovery steps clear."},
     "errors.state.signed_out": {"text": "{account} is signed out of Microsoft. Open Accounts and choose Sign in again.", "note": "Unreadable-state notice on Overview or run details. account is the user's account label or localized default label. Sign in again names the Accounts action."},
     "errors.state.page_blank": {"text": "The Rewards page stayed empty, so nothing could be read. The next check tries again.", "note": "Unreadable-state notice on Overview or run details. No placeholders. Explain that an empty page is unknown, not zero points."},

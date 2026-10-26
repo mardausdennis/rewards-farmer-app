@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from rfapp import paths, runs
+from rfapp import account_history, paths, runs
 import stats_ledger
 
 
@@ -76,7 +76,10 @@ def _days(rows, ids, today, coverage, first):
 					summaries[summary["run_id"]] = dict(summary, problems=list(summary["problems"]))
 				else:
 					current = summaries[summary["run_id"]]
-					current["points_earned"] = _sum([current["points_earned"], summary["points_earned"]])
+					contributions = [current["points_earned"], summary["points_earned"]]
+					current["points_earned"] = sum(contributions) if all(value is not None for value in contributions) else None
+					if current["result"] != summary["result"]:
+						current["result"], current["result_key"] = "partial", "errors.run.partial"
 					for problem in summary["problems"]:
 						if problem["task"] is not None or not any(item["task"] is None for item in current["problems"]):
 							current["problems"].append(problem)
@@ -130,7 +133,9 @@ def get_stats(request, *, settings, prefs, now):
 	today = now.astimezone().date()
 	first = today - timedelta(days=period - 1)
 	coverage = datetime.fromisoformat(ledger["coverage_from"]).date() if ledger["coverage_from"] else None
-	rows = {(row["date"], row["account_id"]): row for row in ledger["rows"] if row["account_id"] in selected_ids and row["date"] <= today.isoformat()}
+	rules = account_history.aliases(prefs.get("history_aliases", []))
+	projected = account_history.rows_for_view(ledger["rows"], paths.runs_dir(), str(settings_module.user_data_dir()), rules, now)
+	rows = {key: row for key, row in projected.items() if row["account_id"] in selected_ids and row["date"] <= today.isoformat()}
 	begin = min(coverage or today, today - timedelta(days=89), first, today.replace(day=1), today - timedelta(days=(today.isoweekday() - week_start) % 7))
 	days = _days(rows, selected_ids, today, coverage, begin)
 	if selected is None:
@@ -146,6 +151,7 @@ def get_stats(request, *, settings, prefs, now):
 			events = stats_ledger._read_record(paths.runs_dir() / (run_id + ".jsonl"))
 		except FileNotFoundError:
 			continue
+		events = account_history.project_events(events, str(settings_module.user_data_dir()), rules)
 		start = next((event for event in events if event.get("type") == "run_start"), {})
 		at = stats_ledger._at(start.get("ts"))
 		profiles = {event.get("account"): event.get("profile") for event in events if event.get("type") == "account_start"}
@@ -153,7 +159,7 @@ def get_stats(request, *, settings, prefs, now):
 		if at is not None and at <= now and (selected is None or names):
 			day = by_date.get(at.astimezone().date().isoformat())
 			if day is not None and (coverage is None or at.astimezone().date() >= coverage):
-				day["runs"].append(stats_ledger.run_summary(run_id, events, active=True, account=names[0] if selected is not None else None))
+				day["runs"].append(account_history.summary(run_id, events, active=True, name=names[0] if selected is not None else None))
 	for day in days:
 		day["runs"].sort(key=lambda summary: (summary["started_at"] or "", summary["run_id"]))
 	ranged = [day for day in days if day["date"] >= first.isoformat()]
@@ -177,11 +183,16 @@ def get_stats(request, *, settings, prefs, now):
 	if len(selected_ids) == 1 and prefs.get("goals", {}).get(selected_ids[0]) is not None:
 		overview = runs.overview(settings, prefs, now)
 		goal = next((row["goal"] for row in overview["accounts"] if row["account_id"] == selected_ids[0]), None)
+	def period_earned(first_date):
+		values = [day["earned"] for day in days if day["date"] >= first_date.isoformat() and coverage is not None and day["date"] >= coverage.isoformat()]
+		if selected is None and len(selected_ids) > 1:
+			return sum(values) if values and all(value is not None for value in values) else None
+		return _sum(values)
 	return {"generated_at": stats_ledger._iso(now), "today": today.isoformat(), "range": period, "from": first.isoformat(),
 		"account_id": selected, "accounts": accounts, "coverage_from": coverage.isoformat() if coverage else None,
 		"days": [day for day in days if day["date"] >= (today - timedelta(days=89)).isoformat()],
-		"totals": {"week_earned": _sum([day["earned"] for day in days if day["date"] >= week.isoformat()]),
-			"month_earned": _sum([day["earned"] for day in days if day["date"] >= today.replace(day=1).isoformat()]),
+		"totals": {"week_earned": period_earned(week),
+			"month_earned": period_earned(today.replace(day=1)),
 			"earned": measured if known and len(known) == expected else None, "measured_earned": measured,
 			"known_days": len(known), "expected_days": expected, "average_per_day": measured / len(known) if known else None,
 			"best_day": {"date": best["date"], "earned": best["earned"]} if best else None,

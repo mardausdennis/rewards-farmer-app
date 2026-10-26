@@ -27,7 +27,7 @@ ROUTES = (
 	("live", "#/live", "live/failed", "live", (".live-more-details > summary",)),
 	("history", "#/history", "history/week", "history", (".history-day-page .history-check-group > summary",)),
 	("history-detail", "#/history/synthetic-partial", "history/detail", "history", ("[data-run-id='synthetic-partial'] .history-technical > summary",)),
-	("accounts", "#/accounts", "accounts/list", "accounts", (".accounts-entry .accounts-disclosure > summary", ".accounts-list > .accounts-disclosure > summary")),
+	("accounts", "#/accounts", "accounts/list", "accounts", (".accounts-entry .accounts-disclosure > summary",)),
 	("settings", "#/settings", "settings/legacy", "settings", ()),
 	("settings-schedule", "#/settings/schedule", "settings/legacy", "settings", ()),
 	("settings-run", "#/settings/run", "settings/openrouter", "settings", ()),
@@ -146,8 +146,18 @@ class LocalePassTests(unittest.TestCase):
 									check(!document.querySelector('.setup-progress'),'redundant step sentence omitted');
 								}else if(screen==='overview'){
 									const overview=store.get('overview'),selected=document.querySelector('#overview-account')?.value;
-									const account=overview.accounts.find(item=>item.account_id===selected)||overview.accounts[0];
-									formattedValue('.overview-balance .stat-value',number(account.state.balance));
+									if(overview.accounts.length>1){
+										check(selected==='all','Overview defaults to all accounts',view,0,'format');
+										check(document.querySelectorAll('#overview-account option').length===overview.accounts.length+1,'Overview selector includes every account and all accounts',view,0,'format');
+										const fields=['balance','earned_today','open_points'];
+										check(document.querySelectorAll('.overview-account-totals .stat-value').length===fields.length,'Overview shows every backend total',view,0,'format');
+										fields.forEach((field,index)=>formattedValue('.overview-account-totals > :nth-child('+(index+1)+') .stat-value',overview.totals[field]==null?i.t('common.value.unknown'):number(overview.totals[field])));
+										check(document.querySelectorAll('[data-overview-account]').length===overview.accounts.length,'Overview shows every account summary',view,0,'format');
+										for(const account of overview.accounts)formattedValue('[data-overview-account="'+CSS.escape(account.account_id)+'"] .stat-value',account.state?.balance==null?i.t('common.value.unknown'):number(account.state.balance));
+									}else{
+										check(!document.querySelector('#overview-account'),'Single account has no selector',view,0,'format');
+										formattedValue('.overview-balance .stat-value',overview.accounts[0].state?.balance==null?i.t('common.value.unknown'):number(overview.accounts[0].state.balance));
+									}
 									const timestamp=new Date(overview.generated_at),now=new Date();
 									formattedValue('.overview-screen .screen-header p',timestamp.toDateString()===now.toDateString()?i.t('overview.date_today'):date(timestamp));
 									formattedValue('.overview-next-link',time(overview.schedule.next_at),true);
@@ -174,6 +184,9 @@ class LocalePassTests(unittest.TestCase):
 										check(document.querySelector(css)?.dateTime===run.started_at,'History run timestamp identity '+run.run_id,document.querySelector(css)||view,0,'format');
 									}
 								}else if(screen==='accounts'){
+									const add=document.getElementById('accounts-add-another');
+									check(Boolean(add)&&!add.disabled&&text(add)===i.t('accounts.enrollment.add'),'Accounts add action is available and translated',add||view);
+									check(!document.querySelector('.accounts-list > .accounts-disclosure'),'Removed add-limit disclosure stays absent',view);
 									const account=store.get('accounts')[0];
 									formattedValue('.account-row > .tabular',number(account.balance),true);
 								}else if(name==='settings'||name==='settings-schedule'){

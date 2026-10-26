@@ -44,7 +44,7 @@ export function mount(view, ctx) {
     }
 
     function metric(labelKey, value) {
-        return Number.isFinite(value) ? el("div", { class: "stats-metric" }, [el("p", { class: "stats-metric-value tabular", text: number(value) }), el("p", { class: "stats-metric-label", text: t(labelKey) })]) : null;
+        return Number.isFinite(value) || data?.accounts.length > 1 ? el("div", { class: "stats-metric", "data-metric": labelKey }, [el("p", { class: `stats-metric-value${Number.isFinite(value) ? " tabular" : " is-unknown"}`, text: Number.isFinite(value) ? number(value) : t("common.value.unknown") }), el("p", { class: "stats-metric-label", text: t(labelKey) })]) : null;
     }
 
     function progressText(day) {
@@ -149,6 +149,11 @@ export function mount(view, ctx) {
             return;
         }
         for (const warning of data.warnings) root.append(c.banner.create({ tone: "warning", messageKey: `stats.warning.${warning.code}` }));
+        if (loading && data.accounts.length > 1) {
+            root.append(c.spinner.create({ labelKey: "stats.loading" }));
+            if (focusId) root.querySelector(`#${focusId}`)?.focus();
+            return;
+        }
         const { totals: metrics, days } = data;
         const selectedDays = days.slice(-data.range);
         root.append(el("div", { class: "stats-metrics" }, [metric("stats.week", metrics.week_earned), metric("stats.month", metrics.month_earned), metric("stats.streak.title", data.streak.current)]));

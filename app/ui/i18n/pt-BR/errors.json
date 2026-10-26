@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "Confirme as contas existentes antes de adicionar outra.", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "Primeiro confirme ou cancele a conta que está aguardando confirmação.", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "Esta confirmação expirou. Entre novamente para confirmar a conta.", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "Não foi possível salvar a confirmação da conta. Tente novamente.", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "Não foi possível ler o nome da conta Microsoft. Entre novamente.", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "Outra conta Microsoft está conectada. Entre com a conta confirmada.", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "A transferência da conta não terminou. Tente adicionar a conta novamente.", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "Esta conta foi ignorada porque precisa ser confirmada em Contas.", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "Esta conta foi ignorada porque não foi possível verificar seu nome na Microsoft.", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "Esta conta foi ignorada porque outra conta Microsoft está conectada.", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "A Microsoft pede que {account} aceite os termos atualizados. Escolha Entrar novamente, aceite os termos na janela que abrir e feche a janela.", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "{account}: a conta está desconectada da Microsoft. Abra Contas e escolha Entrar novamente.", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "A página do Rewards ficou vazia e não foi possível ler os dados. A próxima verificação tenta novamente.", "src": "c412ce65"},

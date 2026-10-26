@@ -4,6 +4,7 @@ import json
 import io
 import logging
 import os
+import re
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -51,10 +52,10 @@ def _quit(driver) -> None:
 		try:
 			driver.quit()
 		except Exception:
-			_logger.exception("Could not close the sign-in browser")
+			_logger.warning("Could not close the sign-in browser")
 
 
-def run(account_id, new) -> int:
+def run(account_id, new, enroll=False) -> int:
 	import dotenv
 	try:
 		text = read_file(paths.env_path())
@@ -72,9 +73,22 @@ def run(account_id, new) -> int:
 	from selenium import webdriver
 	from selenium.common.exceptions import WebDriverException
 	from rfapp import accounts_admin, schedule
+	import identity
 
 	if not isinstance(account_id, str) or new and account_id == "@root" or account_id != "@root" and not accounts.directory_name_is_valid(account_id):
 		raise ValueError("Invalid profile id")
+	if enroll and not new and account_id not in [*settings.active_accounts(), *settings.paused_accounts()]:
+		_write_status(account_id, "failed", "enrollment_required")
+		return 1
+	if enroll and new and not re.fullmatch(r"account-[1-9][0-9]*", account_id):
+		_write_status(account_id, "failed", "enrollment_required")
+		return 1
+	if new and settings.active_accounts() and not enroll:
+		_write_status(account_id, "failed", "enrollment_required")
+		return 1
+	if new and enroll and not (paths.data_home() / "account-migration.json").exists() and any(identity.binding(account, paths.data_home()) is None for account in [*settings.active_accounts(), *settings.paused_accounts()]):
+		_write_status(account_id, "failed", "enrollment_required")
+		return 1
 	root = settings.user_data_dir()
 	if account_id != "@root":
 		profile = root / account_id
@@ -92,9 +106,10 @@ def run(account_id, new) -> int:
 	session_saved = False
 	error_code = None
 	detail = None
+	observed_name = None
 	try:
 		_write_status(account_id, "starting")
-		if new and (root / "Local State").is_file() and "@root" in settings.active_accounts():
+		if new and ((root / "Local State").is_file() and "@root" in settings.active_accounts() or (paths.data_home() / "account-migration.json").exists()):
 			accounts_admin.migrate_root_profile(account_id)
 		account = accounts.get_default_account() if account_id == "@root" else accounts.Account(account_id, str(profile), "Default")
 		try:
@@ -102,7 +117,7 @@ def run(account_id, new) -> int:
 			visible.set_page_load_timeout(60)
 			visible.get("https://rewards.bing.com/")
 		except WebDriverException as exc:
-			error_code, detail = browser.start_failure_code(exc), str(exc)
+			error_code, detail = browser.start_failure_code(exc), type(exc).__name__
 		else:
 			_write_status(account_id, "waiting")
 			deadline = time.monotonic() + 15 * 60
@@ -120,6 +135,10 @@ def run(account_id, new) -> int:
 				if urlsplit(url).hostname == "rewards.bing.com":
 					balance = rewards_state.read_balance(visible, element_selectors.ElementSelectionUtils(visible))
 					if balance is not None:
+						if enroll:
+							candidate = accounts_admin._profile_identity(account_id).get("name")
+							matched, _ = identity.read_dashboard_identity(visible, candidate)
+							observed_name = candidate if matched == "match" else None
 						time.sleep(3)
 						state, verify = "signed_in", False
 						break
@@ -139,12 +158,23 @@ def run(account_id, new) -> int:
 					else:
 						state = "signed_in"
 						error_code = "terms_of_use" if snapshot.unreadable == "terms_of_use" else None
+						if enroll:
+							candidate = accounts_admin._profile_identity(account_id).get("name")
+							matched, _ = identity.read_dashboard_identity(verification, candidate)
+							observed_name = candidate if matched == "match" else None
 				except WebDriverException as exc:
-					state, error_code, detail = "failed", browser.start_failure_code(exc), str(exc)
+					state, error_code, detail = "failed", browser.start_failure_code(exc), type(exc).__name__
 				finally:
 					_quit(verification)
 					verification = None
-		if new and state == "signed_in":
+		if enroll and state == "signed_in":
+			session_saved = True
+			if observed_name is None:
+				state, error_code = "failed", "identity_unknown"
+			else:
+				identity.stage_enrollment(account_id, observed_name, new=new, directory=paths.data_home())
+				state = "awaiting_confirmation"
+		elif new and state == "signed_in":
 			session_saved = True
 			editor = EnvFile.load(paths.env_path())
 			active = [item for item in settings.active_accounts() if item != "@root"]
@@ -154,10 +184,10 @@ def run(account_id, new) -> int:
 			editor.save()
 			schedule.ensure()
 	except Exception as exc:
-		_logger.exception("Sign-in failed for profile %s", account_id)
+		_logger.error("Sign-in failed for profile %s (%s)", account_id, type(exc).__name__)
 		state = "failed"
 		error_code = getattr(exc, "code", "unknown")
-		detail = str(exc)
+		detail = type(exc).__name__
 	finally:
 		_quit(visible)
 		_quit(verification)
@@ -170,4 +200,4 @@ def run(account_id, new) -> int:
 			_cancel_path(account_id).unlink(missing_ok=True)
 		finally:
 			lock.release()
-	return 0 if state == "signed_in" else 1
+	return 0 if state in ("signed_in", "awaiting_confirmation") else 1

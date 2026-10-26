@@ -1,0 +1,9 @@
+{
+  "synthetic":true,
+  "note":"F108 existing single-account identity is unconfirmed. Add account must confirm it before adding a second person.",
+  "scenario":"multi-account-unconfirmed",
+  "methods":{
+    "list_accounts":{"ok":true,"data":{"accounts":[{"id":"account-1","label":"Jamie","dir":"C:\\Synthetic\\account-1","paused":false,"is_root":false,"signed_in":true,"balance":12340,"balance_at":"2026-10-26T15:32:00Z","last_run_at":null,"last_result":null,"email":"jamie@example.invalid","name":"Jamie Synthetic","picture_rev":null,"identity_status":"unconfirmed","identity_confirmed_at":null,"identity_last_status":"unknown","identity_checked_at":null}]}}
+  },
+  "pushes":[]
+}

@@ -3,6 +3,9 @@
 .accounts-help { color: var(--c-text-2); max-inline-size: 70ch; }
 .accounts-list { border-block-start: 1px solid var(--c-border); }
 .accounts-entry { min-inline-size: 0; }
+.accounts-list > #accounts-add-another { margin-block: var(--sp-4); }
+.accounts-identity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); padding-block-end: var(--sp-3); font-size: var(--fs-2); color: var(--c-text-2); overflow-wrap: anywhere; }
+.accounts-identity[data-identity-check="mismatch"] { color: var(--c-danger); }
 .accounts-invited-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); padding-block-start: var(--sp-4); }
 .accounts-invited-heading h2, .accounts-referrals h2 { font-size: var(--fs-4); font-weight: var(--fw-medium); }
 .accounts-invited-empty { color: var(--c-text-2); padding-block: var(--sp-3); }

@@ -7,14 +7,16 @@ import io
 import json
 import logging
 import os
+import secrets
 import subprocess
+import tempfile
 import threading
 import warnings
 from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
 
-from file_replace import read_file
+from file_replace import read_file, replace_file
 from rfapp import paths, prefs, settings, signin
 from rfapp.envfile import EnvFile
 
@@ -253,6 +255,9 @@ def _profile_path(account_id: str) -> Path:
 def _free_ids(count=1, exclude=()) -> list[str]:
 	root = settings.user_data_dir()
 	used = {entry.casefold() for entry in [*settings.active_accounts(), *settings.paused_accounts(), *exclude]}
+	import identity
+	used.update(str(entry).casefold() for entry in identity.load(paths.data_home())["used_ids"])
+	used.update(str(alias.get("to", "")).casefold() for alias in prefs.load().get("history_aliases", []) if isinstance(alias, dict))
 	if root.is_dir():
 		used.update(entry.name.casefold() for entry in root.iterdir())
 	result = []
@@ -328,6 +333,12 @@ def _signin_status(account_id: str) -> dict:
 		raise _error("accounts.unknown")
 	if value.get("account_id") != account_id:
 		raise _error("accounts.unknown")
+	if value.get("state") == "awaiting_confirmation":
+		import identity
+		try:
+			if identity.pending(account_id, paths.data_home()) is None: value.update(state="signed_in")
+		except identity.IdentityError:
+			value.update(state="failed", error_code="enrollment_expired", message_key="accounts.signin.failed")
 	if value.get("state") in _ACTIVE_STATES:
 		try:
 			age = (datetime.now(timezone.utc) - datetime.fromisoformat(value["at"].replace("Z", "+00:00"))).total_seconds()
@@ -380,7 +391,10 @@ def _list_accounts() -> list[dict]:
 					row["signed_in"] = None if code == "page_blank" else code != "signed_out"
 				if event.get("balance") is not None and "balance" not in row:
 					row["balance"], row["balance_at"] = event["balance"], event.get("ts")
+			if event.get("type") == "identity_check" and "identity_last_status" not in row:
+				row["identity_last_status"], row["identity_checked_at"] = event.get("status"), event.get("ts")
 	result = []
+	import identity
 	for number, account_id in enumerate([*active, *paused], 1):
 		row = observed.get(account_id, {})
 		if "signed_in" not in row and (runs / f"signin-{account_id.replace('@', '')}.json").is_file():
@@ -391,7 +405,14 @@ def _list_accounts() -> list[dict]:
 				pass
 		label = labels.get(account_id) or i18n.current().t("accounts.default_label", number=number)
 		picture = _picture_source(account_id)
-		result.append({"id": account_id, "label": label, "dir": str(_profile_path(account_id)), "paused": account_id in paused, "is_root": account_id == "@root", **{key: row.get(key) for key in ("signed_in", "balance", "balance_at", "last_run_at", "last_result")}, **_profile_identity(account_id), "picture_rev": picture[2] if picture is not None else None})
+		try:
+			bound = identity.binding(account_id, paths.data_home())
+			identity_status = "confirmed" if bound else "unconfirmed"
+		except identity.IdentityError:
+			bound, identity_status = None, "unknown"
+		result.append({"id": account_id, "label": label, "dir": str(_profile_path(account_id)), "paused": account_id in paused, "is_root": account_id == "@root", **{key: row.get(key) for key in ("signed_in", "balance", "balance_at", "last_run_at", "last_result")}, **_profile_identity(account_id), "picture_rev": picture[2] if picture is not None else None,
+			"identity_status": identity_status, "identity_confirmed_at": bound["confirmed_at"] if bound else None,
+			"identity_last_status": row.get("identity_last_status"), "identity_checked_at": row.get("identity_checked_at")})
 	return result
 
 
@@ -403,13 +424,14 @@ def _raise_unknown():
 	raise _error("accounts.unknown")
 
 
-def _start_signin(account_id: str, new: bool) -> dict:
+def _start_signin(account_id: str, new: bool, enroll=False) -> dict:
 	_profile_path(account_id)
 	signin._cancel_path(account_id).unlink(missing_ok=True)
 	starting = signin._write_status(account_id, "starting", pid=0)
 	# Until the child rewrites the file, its 30-second grace period matters
 	# more than the window process's pid.
 	args = ["--signin", account_id, *( ["--new"] if new else [])]
+	if enroll: args.append("--enroll")
 	flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 	options = {"cwd": paths.data_home(), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
 	try:
@@ -424,51 +446,114 @@ def _start_signin(account_id: str, new: bool) -> dict:
 
 
 def _add_account(confirm_migration=False) -> dict:
+	import identity
+	journal_path = paths.data_home() / "account-migration.json"
+	if journal_path.exists():
+		_ensure_idle()
+		journal = json.loads(read_file(journal_path))
+		if journal.get("root") != str(settings.user_data_dir().resolve()): raise _error("accounts.migration_pending")
+		account_id = journal.get("requested")
+		_profile_path(account_id)
+		return {"account_id": account_id, "signin": _start_signin(account_id, True, enroll=True)}
+	registered = [*settings.active_accounts(), *settings.paused_accounts()]
+	if registered:
+		missing = [account for account in registered if identity.binding(account, paths.data_home()) is None]
+		if missing:
+			raise _error("accounts.enrollment_required", params={"account_ids": missing})
+		if identity.load(paths.data_home())["pending"]:
+			raise _error("accounts.enrollment_pending")
 	_ensure_idle()
 	migration = "@root" in settings.active_accounts()
 	if migration and not confirm_migration:
 		raise _error("accounts.migration_needed")
 	account_id = _free_ids(2 if migration else 1)[-1]
-	return {"account_id": account_id, "signin": _start_signin(account_id, True)}
+	return {"account_id": account_id, "signin": _start_signin(account_id, True, enroll=True) if registered else _start_signin(account_id, True)}
 
 
 def _migrate_root_profile(new_account_id: str) -> str:
 	import run_lock
+	import identity
 	root = settings.user_data_dir()
 	info = run_lock.status(directory=str(root))
 	if info is None or info.owner != "signin" or info.pid != os.getpid():
 		raise _error("run.busy")
 	_profile_path(new_account_id)
-	target_id = _free_ids(exclude=(new_account_id,))[0]
+	journal_path = paths.data_home() / "account-migration.json"
+	if journal_path.exists():
+		journal = json.loads(read_file(journal_path))
+		if journal.get("root") != str(root.resolve()) or journal.get("requested") != new_account_id or not isinstance(journal.get("entries"), list):
+			raise _error("accounts.migration_pending")
+		target_id = journal["target"]
+		_profile_path(target_id)
+		if any(not isinstance(name, str) or name != Path(name).name or name in (".", "..") for name in journal["entries"]):
+			raise _error("accounts.migration_pending")
+	else:
+		aliases = prefs.load().get("history_aliases", [])
+		if not (root / "Local State").exists() and aliases:
+			alias = aliases[-1]
+			if alias.get("from") == "@root" and (_profile_path(alias["to"]) / "Local State").exists(): return alias["to"]
+		target_id = _free_ids(exclude=(new_account_id,))[0]
+		entries = _root_entries(exclude=(target_id,))
+		documents = (paths.env_path(), paths.prefs_path(), paths.data_home() / "account-identities.json")
+		journal = {"v": 1, "root": str(root.resolve()), "requested": new_account_id, "target": target_id, "entries": [entry.name for entry in entries],
+			"before": {path.name: base64.b64encode(path.read_bytes()).decode("ascii") if path.exists() else None for path in documents}}
+		identity.write_document(journal_path, journal)
 	target = root / target_id
-	target.mkdir()
-	moved = []
+	target.mkdir(exist_ok=True)
 	try:
-		for entry in _root_entries(exclude=(target_id,)):
-			os.rename(entry, target / entry.name)
-			moved.append(entry.name)
+		for name in journal["entries"]:
+			entry, destination = root / name, target / name
+			if entry.exists() and not destination.exists(): os.rename(entry, destination)
+			elif entry.exists() or not destination.exists(): raise OSError("Ambiguous migration entry")
 		editor = EnvFile.load(paths.env_path())
 		editor.set("REWARDS_ACCOUNTS", target_id)
 		editor.save()
-	except OSError as exc:
-		try:
-			for name in reversed(moved):
-				os.rename(target / name, root / name)
-			target.rmdir()
-		except OSError as rollback:
-			_logger.exception("Profile migration rollback failed at %s", target)
-			raise _error("profile_in_use", f"{exc}; rollback failed: {rollback}; data remains at {target}") from rollback
-		raise _error("profile_in_use", str(exc)) from exc
-	state = prefs.load()
-	changes = {}
-	for key in ("account_labels", "goals"):
-		values = dict(state[key])
-		if "@root" in values:
-			values[target_id] = values.pop("@root")
-			changes[key] = values
-	if changes:
+		bindings = identity.load(paths.data_home())
+		if "@root" in bindings["bindings"]:
+			bindings["bindings"][target_id] = {**bindings["bindings"].pop("@root"), "account_id": target_id}
+		if target_id not in bindings["used_ids"]: bindings["used_ids"].append(target_id)
+		identity.save(bindings, paths.data_home())
+		state = prefs.load()
+		changes = {}
+		for key in ("account_labels", "goals"):
+			values = dict(state[key])
+			if "@root" in values:
+				values[target_id] = values.pop("@root")
+				changes[key] = values
+		aliases = list(state.get("history_aliases", []))
+		if not any(item.get("from") == "@root" and item.get("to") == target_id for item in aliases):
+			aliases.append({"from": "@root", "to": target_id, "before": identity.utc()})
+		changes["history_aliases"] = aliases
 		prefs.save(changes)
+	except Exception as exc:
+		try:
+			for name in reversed(journal["entries"]):
+				if (target / name).exists() and not (root / name).exists(): os.rename(target / name, root / name)
+			target.rmdir()
+			for name, content in journal["before"].items():
+				path = paths.data_home() / name
+				if content is None: path.unlink(missing_ok=True)
+				else: _restore_document(path, base64.b64decode(content))
+			journal_path.unlink()
+		except OSError as rollback:
+			_logger.error("Profile migration rollback incomplete (%s)", type(rollback).__name__)
+			raise _error("accounts.migration_pending") from None
+		raise _error("profile_in_use", type(exc).__name__) from None
+	journal_path.unlink(missing_ok=True)
 	return target_id
+
+
+def _restore_document(path, content):
+	name = None
+	try:
+		with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, prefix=".account-restore-", delete=False) as stream:
+			name = stream.name
+			stream.write(content)
+			stream.flush()
+			os.fsync(stream.fileno())
+		replace_file(name, path)
+	finally:
+		if name is not None: Path(name).unlink(missing_ok=True)
 
 
 def _rename_account(account_id: str, label: str) -> dict:
@@ -545,8 +630,77 @@ def _sign_in_again(account_id: str) -> dict:
 	return _start_signin(account_id, False)
 
 
+def begin_enrollment(account_id):
+	_known_account(account_id)
+	_ensure_idle()
+	return {"signin": _start_signin(account_id, False, enroll=True)}
+
+
+def get_enrollment_status(account_id):
+	import identity
+	_profile_path(account_id)
+	pending = identity.pending(account_id, paths.data_home())
+	if pending is None:
+		_known_account(account_id)
+		return {"account_id": account_id, "state": "not_observed", "observed_name": None, "confirmation_token": None, "observed_at": None, "same_name_limit": True}
+	return {"account_id": account_id, "state": "awaiting_confirmation", "observed_name": pending["observed_name"], "confirmation_token": pending["token"], "observed_at": pending["observed_at"], "same_name_limit": True}
+
+
+def confirm_enrollment(account_id, confirmation_token, confirmed):
+	import identity
+	_ensure_idle()
+	_profile_path(account_id)
+	if confirmed is not True or not isinstance(confirmation_token, str):
+		raise _error("accounts.enrollment_required")
+	pending = identity.pending(account_id, paths.data_home())
+	if pending is None or not secrets.compare_digest(pending["token"], confirmation_token):
+		raise _error("accounts.enrollment_required")
+	before = identity.load(paths.data_home())
+	old = identity.binding(account_id, paths.data_home())
+	if old is not None and old["expected_name_hash"] != pending["observed_hash"]:
+		raise _error("accounts.identity_mismatch")
+	value = json.loads(json.dumps(before))
+	value["bindings"][account_id] = old or {"account_id": account_id, "expected_name_hash": pending["observed_hash"], "confirmed_at": identity.utc()}
+	active, paused = settings.active_accounts(), settings.paused_accounts()
+	if pending["new"] and any(identity.binding(account, paths.data_home()) is None for account in [*active, *paused]):
+		raise _error("accounts.enrollment_required")
+	if pending["new"] and account_id not in [*active, *paused]: active.append(account_id)
+	registered = [*active, *paused]
+	if len(registered) > 1 and all(account in value["bindings"] for account in registered): value["mode"] = "managed"
+	# Keep a failed enrollment retryable; registration is last, after the binding.
+	editor = EnvFile.load(paths.env_path())
+	prefs_before = paths.prefs_path().read_bytes() if paths.prefs_path().exists() else None
+	env_before = paths.env_path().read_bytes() if paths.env_path().exists() else None
+	try:
+		identity.save(value, paths.data_home())
+		if value["mode"] == "managed": prefs.save({"identity_managed": True})
+		if pending["new"]:
+			editor.set("REWARDS_ACCOUNTS", ",".join(item for item in active if item != "@root"))
+			editor.save()
+		value["pending"].pop(account_id, None)
+		identity.save(value, paths.data_home())
+	except OSError:
+		identity.save(before, paths.data_home())
+		if prefs_before is None: paths.prefs_path().unlink(missing_ok=True)
+		else: _restore_document(paths.prefs_path(), prefs_before)
+		if env_before is None: paths.env_path().unlink(missing_ok=True)
+		else: _restore_document(paths.env_path(), env_before)
+		raise _error("accounts.enrollment_save_failed") from None
+	if pending["new"]:
+		from rfapp import schedule
+		schedule.ensure()
+	return {"account_id": account_id, "identity_status": "confirmed", "confirmed_at": value["bindings"][account_id]["confirmed_at"], "managed": value["mode"] == "managed", "same_name_limit": True}
+
+
 def _cancel_signin(account_id: str) -> None:
-	_signin_status(account_id)
+	status = _signin_status(account_id)
+	import identity
+	value = identity.load(paths.data_home())
+	if account_id in value["pending"]:
+		value["pending"].pop(account_id, None)
+		identity.save(value, paths.data_home())
+		signin._write_status(account_id, "cancelled")
+		return
 	signin._cancel_path(account_id).write_text("", encoding="utf-8")
 
 
@@ -577,6 +731,12 @@ def _remove_account(account_id: str, delete_data: bool) -> dict:
 	active = [entry for entry in settings.active_accounts() if entry != account_id and entry != "@root"]
 	paused = [entry for entry in settings.paused_accounts() if entry != account_id]
 	_write_account_lists(active, paused)
+	import identity
+	bindings = identity.load(paths.data_home())
+	bindings["bindings"].pop(account_id, None)
+	bindings["pending"].pop(account_id, None)
+	if account_id not in bindings["used_ids"]: bindings["used_ids"].append(account_id)
+	identity.save(bindings, paths.data_home())
 	state = prefs.load()
 	for key in ("account_labels", "goals"):
 		state[key].pop(account_id, None)
@@ -602,8 +762,6 @@ def import_legacy_install() -> dict:
 
 
 def add_account(confirm_migration=False) -> dict:
-	if list_accounts()["accounts"]:
-		raise _error("accounts.add_unsupported")
 	return _add_account(confirm_migration)
 
 

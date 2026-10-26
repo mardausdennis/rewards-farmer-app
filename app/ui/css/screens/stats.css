@@ -8,6 +8,7 @@
 .stats-metric { min-inline-size: 0; }
 .stats-metric-label { color: var(--c-text-2); font-size: var(--fs-2); white-space: nowrap; }
 .stats-metric-value { font-size: var(--fs-7); font-weight: var(--fw-medium); line-height: var(--lh-tight); margin-block-end: var(--sp-1); }
+.stats-metric-value.is-unknown { font-size: var(--fs-4); overflow-wrap: anywhere; }
 .stats-main-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
 .stats-panel h2 { font-size: var(--fs-4); margin-block-end: var(--sp-4); white-space: nowrap; }
 .stats-calendar-dates { display: flex; justify-content: space-between; gap: var(--sp-3); color: var(--c-text-2); font-size: var(--fs-2); white-space: nowrap; }

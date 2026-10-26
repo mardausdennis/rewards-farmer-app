@@ -1,6 +1,12 @@
 {
   "namespace":"history",
-  "messages": {
+   "messages": {
+     "history.account":{"text":"Account","note":"Scope selector, only when several real accounts exist."},
+     "history.account.all":{"text":"All accounts","note":"Shows every account-local outcome in each run."},
+     "history.account.ran":{"text":"Ran","note":"This account ran, independently of another account being skipped."},
+     "history.account.skipped":{"text":"Skipped","note":"This account did not run. Its recorded reason follows."},
+     "history.account.failed":{"text":"Failed","note":"This account failed, independently of other account outcomes."},
+     "history.account.unknown":{"text":"Unknown","note":"This account's final outcome is unavailable."},
     "history.title":{"text":"History","note":"Page and document title for the run history and its run details."},
     "history.refresh":{"text":"Refresh history","note":"Reload the current history after new records have arrived."},
     "history.more":{"text":"Load earlier runs","note":"History pagination button; fetches with next_before, not a numeric offset."},

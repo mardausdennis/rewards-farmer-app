@@ -23,6 +23,7 @@ import run_lock
 import run_record
 
 _REAL_POPEN = subprocess.Popen
+_REAL_FARMER_COMMAND = paths.farmer_command
 
 
 class _JobTree:
@@ -214,6 +215,22 @@ class SupervisorTests(unittest.TestCase):
 					self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
 					job.return_value.assign.assert_called_once_with(123)
 					job.return_value.close.assert_called_once()
+
+	def test_managed_strict_option_in_every_app_worker_plan(self):
+		import identity
+		for kind, mode in (("scheduled", "automatic"), ("scheduled", "fixed"), ("run_now", "automatic"), ("check_now", "automatic")):
+			self.settings["schedule.mode"] = mode
+			proc = mock.Mock(pid=123, returncode=0)
+			proc.poll.return_value = 0
+			with mock.patch.object(identity, "managed", return_value=True), mock.patch.object(supervisor.subprocess, "Popen", return_value=proc), mock.patch.object(supervisor, "Job"), mock.patch.object(paths, "farmer_command", return_value=["fake"]) as command:
+				self.assertEqual(supervisor.supervise(kind, ["one"]), 0)
+				self.assertIn("--require-identity", command.call_args.args[0])
+
+	def test_real_paths_source_and_frozen_keep_strict_option(self):
+		for frozen in (False, True):
+			with mock.patch.object(paths, "is_frozen", return_value=frozen):
+				command = _REAL_FARMER_COMMAND(["--check-only", "--require-identity"])
+			self.assertEqual(command[-3:], ["--farm", "--check-only", "--require-identity"])
 
 	@unittest.skipUnless(sys.platform == "win32", "Real Windows job")
 	def test_crash_is_closed_by_supervisor_and_releases_lock(self):

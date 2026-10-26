@@ -1,6 +1,12 @@
 {
   "namespace": "history",
   "messages": {
+    "history.account": {"text": "アカウント", "src": "fb2a1c8f"},
+    "history.account.all": {"text": "すべてのアカウント", "src": "e1cce800"},
+    "history.account.ran": {"text": "実行済み", "src": "2b3ec280"},
+    "history.account.skipped": {"text": "スキップ", "src": "55a21fdf"},
+    "history.account.failed": {"text": "失敗", "src": "66daff25"},
+    "history.account.unknown": {"text": "不明", "src": "aa6d855a"},
     "history.title": {"text": "履歴", "src": "ee7ea2a7"},
     "history.loading": {"text": "履歴を開いています", "src": "1b51a0b8"},
     "history.checks.latest": {"text": "最新の確認を開く", "src": "240765be"},

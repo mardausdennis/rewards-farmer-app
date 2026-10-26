@@ -73,7 +73,8 @@ class AccountsAdminTests(unittest.TestCase):
 		(self.profiles / "Local State").write_text("synthetic")
 		rows = admin._list_accounts()
 		self.assertEqual(len(rows), 1)
-		self.assertEqual(rows[0], {"id": "@root", "label": "Account 1", "dir": str(self.profiles), "paused": False, "is_root": True, "signed_in": None, "balance": None, "balance_at": None, "last_run_at": None, "last_result": None, "email": None, "name": None, "picture_rev": None})
+		self.assertEqual(rows[0], {"id": "@root", "label": "Account 1", "dir": str(self.profiles), "paused": False, "is_root": True, "signed_in": None, "balance": None, "balance_at": None, "last_run_at": None, "last_result": None, "email": None, "name": None, "picture_rev": None,
+			"identity_status": "unconfirmed", "identity_confirmed_at": None, "identity_last_status": None, "identity_checked_at": None})
 
 	def local_state(self, account_id, info):
 		profile = self.profiles if account_id == "@root" else self.profiles / account_id
@@ -187,7 +188,7 @@ class AccountsAdminTests(unittest.TestCase):
 		with patch("rfapp.accounts_admin._ensure_idle", side_effect=AssertionError("Refusal must precede lock work")) as idle, patch("rfapp.accounts_admin.migrate_root_profile", side_effect=AssertionError("Refusal must precede migration")) as migrate, patch("rfapp.accounts_admin._migrate_root_profile", side_effect=AssertionError("Refusal must precede migration")) as private_migrate, patch("rfapp.accounts_admin._start_signin", side_effect=AssertionError("Refusal must precede sign-in")) as start:
 			for confirm in (False, True):
 				with self.subTest(confirm_migration=confirm):
-					self.assert_code("accounts.add_unsupported", admin.add_account, confirm)
+					self.assert_code("accounts.enrollment_required", admin.add_account, confirm)
 			idle.assert_not_called()
 			migrate.assert_not_called()
 			private_migrate.assert_not_called()
@@ -372,7 +373,7 @@ class AccountsAdminTests(unittest.TestCase):
 			with self.subTest(order=[entry.name for entry in order]):
 				calls = []
 				def fail(source, target):
-					calls.append((Path(source), Path(target)))
+					if Path(source).is_relative_to(self.profiles): calls.append((Path(source), Path(target)))
 					if Path(source).name == "Local State":
 						raise PermissionError("Edge lockfile")
 					return rename(source, target)
@@ -540,7 +541,7 @@ class AccountsAdminTests(unittest.TestCase):
 		self.assertEqual(set(admin.set_account_paused("account-1", True)), {"account"})
 		with patch("rfapp.accounts_admin._start_signin", return_value={"account_id": "account-1", "state": "starting"}):
 			self.assertEqual(set(admin.sign_in_again("account-1")), {"signin"})
-			self.assert_code("accounts.add_unsupported", admin.add_account)
+			self.assert_code("accounts.enrollment_required", admin.add_account)
 		signin._write_status("account-1", "waiting")
 		self.assertEqual(admin.get_signin_status("account-1")["state"], "waiting")
 		self.assertEqual(admin.cancel_signin("account-1"), {})

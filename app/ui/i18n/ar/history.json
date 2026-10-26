@@ -1,6 +1,12 @@
 {
   "namespace": "history",
   "messages": {
+    "history.account": {"text": "الحساب", "src": "fb2a1c8f"},
+    "history.account.all": {"text": "كل الحسابات", "src": "e1cce800"},
+    "history.account.ran": {"text": "تم التشغيل", "src": "2b3ec280"},
+    "history.account.skipped": {"text": "تم التخطي", "src": "55a21fdf"},
+    "history.account.failed": {"text": "فشل", "src": "66daff25"},
+    "history.account.unknown": {"text": "غير معروف", "src": "aa6d855a"},
     "history.title": {"text": "المحفوظات", "src": "ee7ea2a7"},
     "history.loading": {"text": "جارٍ فتح المحفوظات", "src": "1b51a0b8"},
     "history.checks.latest": {"text": "فتح آخر تحقق", "src": "240765be"},

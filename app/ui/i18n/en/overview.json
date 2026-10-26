@@ -1,6 +1,9 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.account.all": {"text": "All accounts", "note": "Backend totals and separate streak captures for each real account."},
+    "overview.account.open": {"text": "Open {account}", "note": "Opens this account's Overview. account is its app label."},
+    "overview.streaks.unknown": {"text": "Streaks unknown", "note": "No streak capture exists for this account. Never borrow another account's capture."},
     "overview.title": {"text": "Overview", "note": "Page heading and document title for the overview route."},
     "overview.date_today": {"text": "Today", "note": "Subtitle under Overview when the snapshot timestamp falls on the current local calendar day. Older snapshots show the date formatted for the Windows region instead."},
     "overview.tasks_today": {"text": "Today's tasks", "note": "Heading above all seven task rows, including completed and skipped work."},

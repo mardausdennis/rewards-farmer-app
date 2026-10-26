@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "أكّد الحسابات الموجودة قبل إضافة حساب آخر.", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "أكّد الحساب الذي ينتظر التأكيد أو ألغِ تأكيده أولًا.", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "انتهت صلاحية هذا التأكيد. سجّل الدخول مجددًا لتأكيد الحساب.", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "تعذر حفظ تأكيد الحساب. حاول مجددًا.", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "تعذرت قراءة اسم حساب Microsoft. سجّل الدخول مجددًا.", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "تم تسجيل الدخول بحساب Microsoft مختلف. سجّل الدخول بالحساب المؤكّد.", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "لم يكتمل نقل الحساب. حاول إضافة الحساب مجددًا.", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "تم تخطي هذا الحساب لأنه يحتاج إلى تأكيد في «الحسابات».", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "تم تخطي هذا الحساب لتعذر التحقق من اسمه لدى Microsoft.", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "تم تخطي هذا الحساب لأن حساب Microsoft مختلفًا مسجّل الدخول.", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "تطلب Microsoft من {account} الموافقة على شروط محدّثة. اختر «تسجيل الدخول مجددًا»، ووافق على الشروط في النافذة التي تفتح، ثم أغلقها.", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "{account} غير مسجّل الدخول إلى Microsoft. افتح «الحسابات» واختر «تسجيل الدخول مجددًا».", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "بقيت صفحة Rewards فارغة، فلم يمكن قراءة أي بيانات. ستتم المحاولة مجددًا عند التحقق التالي.", "src": "c412ce65"},

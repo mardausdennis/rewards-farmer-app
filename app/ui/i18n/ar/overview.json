@@ -1,6 +1,9 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.account.all": {"text": "كل الحسابات", "src": "e1cce800"},
+    "overview.account.open": {"text": "فتح {account}", "src": "1e126529"},
+    "overview.streaks.unknown": {"text": "سلاسل الإنجاز غير معروفة", "src": "2e704ef8"},
     "overview.title": {"text": "نظرة عامة", "src": "fb6819e9"},
     "overview.date_today": {"text": "اليوم", "src": "9fc3002e"},
     "overview.tasks_today": {"text": "مهام اليوم", "src": "ee3de2e7"},

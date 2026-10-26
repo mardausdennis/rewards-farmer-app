@@ -42,7 +42,7 @@ class RunReductionTests(unittest.TestCase):
 		run_id = self.fixture("multi")
 		detail = runs.load_run(run_id, {"one": "Personal"}, "profiles")
 		self.assertEqual(detail["result"], "partial")
-		self.assertEqual(detail["points_earned"], 65)
+		self.assertIsNone(detail["points_earned"])
 		one, two = detail["accounts"]
 		self.assertEqual(one["label"], "Personal")
 		self.assertEqual(one["points_now"], 165)
@@ -226,7 +226,7 @@ class RunReductionTests(unittest.TestCase):
 		events = [e for e in run_record.read_events(str(path)) if not (e.get("type") == "state" and e.get("phase") == "after")]
 		path.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
 		detail = runs.load_run(run_id, {}, "profiles")
-		self.assertEqual(detail["points_earned"], 60)
+		self.assertIsNone(detail["points_earned"])
 		self.assertEqual(detail["accounts"][0]["points_now"], 160)
 
 	def test_history_filters_checks_paginates_and_removes_detail_fields(self):

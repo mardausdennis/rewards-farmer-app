@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "请先确认现有帐户，再添加其他帐户。", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "请先确认或取消等待确认的帐户。", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "本次确认已过期。请重新登录以确认帐户。", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "无法保存帐户确认。请重试。", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "无法读取 Microsoft 帐户名称。请重新登录。", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "当前登录了其他 Microsoft 帐户。请使用已确认的帐户登录。", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "帐户尚未完成移动。请重新尝试添加帐户。", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "此帐户需要在“帐户”中确认，因此已跳过。", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "无法检查此帐户的 Microsoft 名称，因此已跳过。", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "当前登录了其他 Microsoft 帐户，因此已跳过此帐户。", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "Microsoft 要求“{account}”接受更新后的条款。请选择“重新登录”，在打开的窗口中接受条款，然后关闭窗口。", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "“{account}”已退出 Microsoft 登录。请打开“帐户”，选择“重新登录”。", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "Rewards 页面一直空白，无法读取任何数据。下次检查时会重试。", "src": "c412ce65"},

@@ -26,6 +26,8 @@ _DEFAULTS = {
 	"tray_hint_shown": False,
 	"account_labels": {},
 	"invited_friends": [],
+	"history_aliases": [],
+	"identity_managed": False,
 	"goals": {},
 	"window": {"width": 1100, "height": 760, "x": None, "y": None, "maximized": False},
 	"last_route": "#/overview",

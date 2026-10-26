@@ -1,6 +1,9 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.account.all": {"text": "Tutti gli account", "src": "e1cce800"},
+    "overview.account.open": {"text": "Apri {account}", "src": "1e126529"},
+    "overview.streaks.unknown": {"text": "Serie sconosciute", "src": "2e704ef8"},
     "overview.title": {"text": "Panoramica", "src": "fb6819e9"},
     "overview.date_today": {"text": "Oggi", "src": "9fc3002e"},
     "overview.tasks_today": {"text": "Attività di oggi", "src": "ee3de2e7"},

@@ -1,6 +1,9 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.account.all": {"text": "すべてのアカウント", "src": "e1cce800"},
+    "overview.account.open": {"text": "{account} を開く", "src": "1e126529"},
+    "overview.streaks.unknown": {"text": "連続記録は不明です", "src": "2e704ef8"},
     "overview.title": {"text": "概要", "src": "fb6819e9"},
     "overview.date_today": {"text": "今日", "src": "9fc3002e"},
     "overview.tasks_today": {"text": "今日のタスク", "src": "ee3de2e7"},

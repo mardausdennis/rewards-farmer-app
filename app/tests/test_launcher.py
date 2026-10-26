@@ -89,6 +89,16 @@ class LauncherTests(unittest.TestCase):
 			self.assertEqual(launcher.main(["--signin", "account-1", "--new"]), 3)
 		call.assert_called_once_with("account-1", new=True)
 
+	def test_enrollment_and_strict_farmer_flag_passthrough(self):
+		call = Mock(return_value=0)
+		with patch.dict(sys.modules, {"rfapp.signin": SimpleNamespace(run=call)}):
+			self.assertEqual(launcher.main(["--signin", "account-2", "--new", "--enroll"]), 0)
+		call.assert_called_once_with("account-2", new=True, enroll=True)
+		call = Mock(return_value=0)
+		with patch.dict(sys.modules, {"main": SimpleNamespace(cli=call)}):
+			self.assertEqual(launcher.main(["--farm", "--check-only", "--require-identity"]), 0)
+		call.assert_called_once_with(["--check-only", "--require-identity"])
+
 	def test_window_dispatch(self):
 		for args, hidden in (([], False), (["--tray"], True)):
 			call = Mock()

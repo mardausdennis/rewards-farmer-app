@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "Confirma las cuentas existentes antes de agregar otra.", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "Primero confirma o cancela la cuenta pendiente de confirmación.", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "Esta confirmación caducó. Vuelve a iniciar sesión para confirmar la cuenta.", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "No se pudo guardar la confirmación de la cuenta. Inténtalo de nuevo.", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "No se pudo leer el nombre de la cuenta de Microsoft. Vuelve a iniciar sesión.", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "Hay otra cuenta de Microsoft conectada. Inicia sesión con la cuenta confirmada.", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "La cuenta aún no se terminó de mover. Intenta agregarla de nuevo.", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "Esta cuenta se omitió porque necesita confirmación en Cuentas.", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "Esta cuenta se omitió porque no se pudo comprobar su nombre de Microsoft.", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "Esta cuenta se omitió porque hay otra cuenta de Microsoft conectada.", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "Microsoft pide que {account} acepte las condiciones actualizadas. Elige Volver a iniciar sesión, acepta las condiciones en la ventana que se abre y ciérrala.", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "La sesión de Microsoft de {account} está cerrada. Abre Cuentas y elige Volver a iniciar sesión.", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "La página de Rewards quedó en blanco y no se pudo leer nada. Se volverá a intentar en la próxima comprobación.", "src": "c412ce65"},

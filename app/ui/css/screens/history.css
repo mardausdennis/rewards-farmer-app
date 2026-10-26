@@ -25,6 +25,9 @@
 .history-check-body .history-run-block { background: transparent; border: 0; border-block-start: 1px solid var(--c-border); border-radius: 0; }
 .history-check-body .button { justify-self: start; }
 .history-account { min-inline-size: 0; }
+.history-account-outcomes { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.history-account-outcomes > li { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); font-size: var(--fs-2); padding-block: var(--sp-2); border-block-end: 1px solid var(--c-border); }
+.history-account-outcomes .reason { flex-basis: 100%; color: var(--c-warning); }
 .history-account h2 { font-size: var(--fs-4); margin-block-end: var(--sp-3); }
 .history-run-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); font-size: var(--fs-2); }
 .history-run-summary > time { font-size: var(--fs-3); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }

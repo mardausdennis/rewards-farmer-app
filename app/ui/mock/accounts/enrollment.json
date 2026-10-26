@@ -1,0 +1,10 @@
+{
+  "synthetic": true,
+  "methods": {
+    "list_accounts": {"ok": true, "data": {"accounts": [{"id": "account-1", "label": "Synthetic account", "dir": "synthetic/account-1", "paused": false, "is_root": false, "signed_in": true, "balance": null, "balance_at": null, "last_run_at": null, "last_result": null, "email": "synthetic@example.invalid", "name": "Synthetic Person", "picture_rev": null, "identity_status": "confirmed", "identity_confirmed_at": "2026-10-26T15:31:00Z", "identity_last_status": "match", "identity_checked_at": "2026-10-26T15:32:00Z"}]}},
+    "begin_enrollment": {"ok": true, "data": {"signin": {"account_id": "account-1", "state": "starting", "error_code": null, "message_key": "accounts.signin.starting", "detail": null, "at": "2026-10-26T15:30:00Z"}}},
+    "get_enrollment_status": {"ok": true, "data": {"account_id": "account-1", "state": "awaiting_confirmation", "observed_name": "Synthetic Person", "confirmation_token": "00000000000000000000000000000108", "observed_at": "2026-10-26T15:30:00Z", "same_name_limit": true}},
+    "confirm_enrollment": {"ok": true, "data": {"account_id": "account-1", "identity_status": "confirmed", "confirmed_at": "2026-10-26T15:31:00Z", "managed": false, "same_name_limit": true}}
+  },
+  "pushes": []
+}

@@ -73,6 +73,9 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 	if kind not in ("scheduled", "run_now", "check_now"):
 		raise ValueError("Unknown supervisor kind")
 	s = settings.load()
+	if (paths.data_home() / "account-migration.json").exists():
+		logger.warning("Run refused while account migration recovery is pending")
+		return 2
 	if kind == "scheduled" and s["schedule.mode"] == "manual":
 		return 0
 	# An unconfigured app must not reach the farmer's implicit root-profile fallback.
@@ -98,6 +101,9 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 		args = ["--unattended", "--only-if-open", "--min-points", "1", "--run-if-unreadable"]
 	else:
 		args = ["--unattended", "--only-if-open", "--min-points", str(s["schedule.min_points"])]
+	import identity
+	if identity.managed(paths.data_home()):
+		args.append("--require-identity")
 	run_id = run_record.new_run_id()
 	directory = paths.runs_dir()
 	path = directory / (run_id + ".jsonl")

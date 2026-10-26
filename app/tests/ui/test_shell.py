@@ -197,7 +197,11 @@ class ShellTests(unittest.TestCase):
 			_harness.viewport(width, height)
 			for lang in ("en", "x-rtl"):
 				_harness.open("#/overview", "overview/multiple", lang=lang).wait_ready()
-				from selenium.webdriver.support.ui import WebDriverWait
+				from selenium.webdriver.support.ui import Select, WebDriverWait
+				row = _main_scroll_extent(_harness.driver)
+				rows.append(row)
+				print("overview all-accounts scroll measurement=" + json.dumps(row), flush=True)
+				Select(_harness.driver.find_element("id", "overview-account")).select_by_index(1)
 				WebDriverWait(_harness.driver, 10).until(lambda browser: browser.execute_script("return !!document.querySelector('[data-screen=overview] .points-chart table')"))
 				row = _main_scroll_extent(_harness.driver)
 				rows.append(row)
@@ -210,7 +214,7 @@ class ShellTests(unittest.TestCase):
 	def test_real_content_bounds_scroll_and_chart_table_accessibility(self):
 		rows = []
 		fixtures = (("overview", "overview/multiple"), ("live", "live/running"), ("history", "history/mixed"), ("accounts", "accounts/list"), ("settings", "settings/automatic"))
-		from selenium.webdriver.support.ui import WebDriverWait
+		from selenium.webdriver.support.ui import Select, WebDriverWait
 		for width, height in ((1920, 1080), (1440, 900)):
 			_harness.viewport(width, height)
 			for language in ("en", "x-rtl"):
@@ -224,6 +228,14 @@ class ShellTests(unittest.TestCase):
 						if row["expectedRange"] == 0:
 							self.assertEqual(0, row["scrollRange"], "A screen whose content fits must not scroll")
 						if screen == "overview":
+							print("all-accounts content scroll proof=" + json.dumps(row), flush=True)
+							Select(_harness.driver.find_element("id", "overview-account")).select_by_index(1)
+							WebDriverWait(_harness.driver, 10).until(lambda browser: browser.execute_script("return !!document.querySelector('[data-screen=overview] .points-chart table')"))
+							row = _main_scroll_extent(_harness.driver)
+							rows.append(row)
+							self.assertLessEqual(row["scrollRange"], row["expectedRange"] + 2, row)
+							if row["expectedRange"] == 0:
+								self.assertEqual(0, row["scrollRange"], "A screen whose content fits must not scroll")
 							table = row["table"]
 							self.assertEqual(31, table["rows"])
 							self.assertEqual("table", table["display"])
@@ -244,6 +256,8 @@ class ShellTests(unittest.TestCase):
 		(SCRATCH / "all-screen-scroll-extents.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
 		_harness.viewport(1920, 1080)
 		_harness.open("#/overview", "overview/multiple").wait_ready()
+		Select(_harness.driver.find_element("id", "overview-account")).select_by_index(1)
+		WebDriverWait(_harness.driver, 10).until(lambda browser: browser.execute_script("return !!document.querySelector('[data-screen=overview] .points-chart table')"))
 		path = _harness.screenshot("overview-contained-table-dark-en-1920x1080")
 		print("Contained table screenshot=" + path, flush=True)
 

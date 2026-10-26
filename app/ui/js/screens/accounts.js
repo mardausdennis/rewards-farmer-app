@@ -17,7 +17,7 @@ export async function mount(view, ctx) {
     const openActions = new Set();
     const root = el("section", { class: "screen accounts-screen", "data-screen": "accounts" });
     view.append(root);
-    const flow = signinFlow(ctx, { accepts: (id) => accounts.some((a) => a.id === id), changed: render, connected: refresh });
+    const flow = signinFlow(ctx, { accepts: (id) => accounts.some((a) => a.id === id) || flow.status?.account_id === id, changed: render, connected: refresh, awaiting: enrollment });
     const invited = invitations(ctx, render);
     const button = (id, props) => { const node = c.button.create(props); node.id = id; return node; };
     const keyId = (account) => encodeURIComponent(account.id);
@@ -57,9 +57,67 @@ export async function mount(view, ctx) {
         finally { busyId = null; render(); }
     }
     async function signin(account) {
+        if (!account) return;
         error = null;
         editId = null;
         try { await flow.start("sign_in_again", { account_id: account.id }); } catch { /* The sign-in panel shows the envelope. */ }
+    }
+    async function enrollment(status) {
+        if (confirming || !alive) return;
+        confirming = true;
+        let dismissed = false;
+        render();
+        try {
+            const observed = await bridge.call("get_enrollment_status", { account_id: status.account_id });
+            if (!alive) return;
+            if (observed.account_id !== status.account_id || observed.state !== "awaiting_confirmation" || typeof observed.observed_name !== "string" || !observed.observed_name.trim() || typeof observed.confirmation_token !== "string" || !observed.confirmation_token) throw { messageKey: "errors.app.accounts_identity_unreadable" };
+            const dialog = document.getElementById("dialog");
+            const dismiss = (event) => { if (event.type === "cancel" || event.key === "Escape") dismissed = true; };
+            dialog.addEventListener("keydown", dismiss, true);
+            dialog.addEventListener("cancel", dismiss, true);
+            let choice;
+            try {
+                choice = await c.dialog.open({ titleKey: "accounts.enrollment.observed_name", bodyKey: "accounts.enrollment.same_name_limit", params: { name: observed.observed_name }, actions: [
+                    { id: "cancel", labelKey: "accounts.enrollment.cancel", variant: "ghost" },
+                    { id: "confirm", labelKey: "accounts.enrollment.confirm", variant: "primary" },
+                ] });
+            } finally {
+                dialog.removeEventListener("keydown", dismiss, true);
+                dialog.removeEventListener("cancel", dismiss, true);
+            }
+            if (!alive) return;
+            if (choice !== "confirm") { if (!dismissed) await flow.cancel(); return; }
+            await bridge.call("confirm_enrollment", { account_id: status.account_id, confirmation_token: observed.confirmation_token, confirmed: true });
+            if (!alive) return;
+            flow.confirmed();
+            error = null;
+            await refresh();
+        } catch (err) { if (alive) error = err; }
+        finally { confirming = false; render(dismissed ? "accounts-confirm-enrollment" : undefined); }
+    }
+    async function beginEnrollment(account) {
+        if (confirming || flow.pending || activeStates.has(flow.status?.state)) return;
+        error = null;
+        try { await flow.start("begin_enrollment", { account_id: account.id }); } catch { /* The sign-in panel owns the error. */ }
+    }
+    async function addAccount(confirmMigration = false) {
+        if (busyId || confirming || flow.pending || activeStates.has(flow.status?.state)) return;
+        if (flow.status?.state === "awaiting_confirmation") { await enrollment(flow.status); return; }
+        const unconfirmed = accounts.find((account) => account.identity_status !== "confirmed");
+        if (unconfirmed) { await beginEnrollment(unconfirmed); return; }
+        error = null;
+        try { await flow.start("add_account", confirmMigration ? { confirm_migration: true } : {}); }
+        catch (err) {
+            if (!alive) return;
+            if (err.code === "accounts.migration_needed" && !confirmMigration) {
+                const choice = await c.dialog.open({ titleKey: "accounts.migration.title", bodyKey: "errors.app.accounts_migration_needed", actions: [{ id: "cancel", labelKey: "common.action.cancel", variant: "ghost" }, { id: "confirm", labelKey: "accounts.migration.confirm", variant: "primary" }] });
+                if (alive && choice === "confirm") await addAccount(true);
+            } else if (err.code === "accounts.enrollment_required") {
+                await refresh();
+                const first = accounts.find((account) => account.identity_status !== "confirmed");
+                if (first) await beginEnrollment(first);
+            }
+        }
     }
     async function remove(account) {
         if (busyId || confirming) return;
@@ -93,6 +151,7 @@ export async function mount(view, ctx) {
     }
     function signinPanel() {
         const status = flow.status;
+        if (status?.state === "awaiting_confirmation" && confirming) return null;
         if (!status) return flow.error ? c.banner.create({ tone: "error", messageKey: flow.error.messageKey, params: flow.error.params }) : null;
         const active = activeStates.has(status.state);
         const children = [];
@@ -100,12 +159,13 @@ export async function mount(view, ctx) {
         children.push(c.banner.create({ tone: status.error_code === "terms_of_use" ? "warning" : status.state === "signed_in" ? "success" : ["busy", "failed", "timed_out"].includes(status.state) ? "warning" : "info", messageKey: flow.cancelling ? "accounts.signin.cancelling" : status.message_key || statusKeys[status.state], params: { account: accounts.find((a) => a.id === status.account_id)?.label } }));
         if (flow.error) children.push(c.banner.create({ tone: "error", messageKey: flow.error.messageKey, params: flow.error.params }));
         if (active) children.push(button("accounts-cancel-signin", { labelKey: "common.action.cancel", onClick: flow.cancel, disabled: flow.cancelling }));
-        else if (status.state !== "signed_in" || status.error_code === "terms_of_use") children.push(button("accounts-retry-signin", { labelKey: "accounts.signin.retry", onClick: () => signin(accounts.find((a) => a.id === status.account_id)), disabled: flow.pending || !accounts.some((a) => a.id === status.account_id) }));
+        else if (status.state === "awaiting_confirmation") children.push(button("accounts-confirm-enrollment", { labelKey: "accounts.enrollment.begin", onClick: () => enrollment(status), disabled: confirming || flow.cancelling }), button("accounts-cancel-enrollment", { labelKey: "accounts.enrollment.cancel", variant: "ghost", onClick: flow.cancel, disabled: confirming || flow.cancelling }));
+        else if (status.state !== "signed_in" || status.error_code === "terms_of_use") children.push(button("accounts-retry-signin", { labelKey: "accounts.signin.retry", onClick: () => accounts.some((a) => a.id === status.account_id) ? signin(accounts.find((a) => a.id === status.account_id)) : addAccount(), disabled: flow.pending }));
         return el("section", { class: "accounts-signin", "aria-label": t("accounts.signin.title"), "aria-live": "polite", "data-signin-state": status.state }, children);
     }
     function accountEntry(account) {
         const id = keyId(account);
-        const locked = Boolean(busyId) || flow.pending || activeStates.has(flow.status?.state);
+        const locked = Boolean(busyId) || confirming || flow.pending || activeStates.has(flow.status?.state) || flow.status?.state === "awaiting_confirmation";
         const actions = [
             button(`accounts-signin-${id}`, { labelKey: "accounts.action.signin_again", disabled: locked, onClick: () => signin(account) }),
             button(`accounts-rename-${id}`, { labelKey: "accounts.action.rename", variant: "ghost", disabled: locked, onClick: () => { editId = account.id; label = account.label; error = null; render("accounts-name"); } }),
@@ -120,6 +180,14 @@ export async function mount(view, ctx) {
         const row = c.accountRow.create({ account, actions: [actions[0], more] });
         if (!Number.isFinite(account.balance)) row.querySelector(".account-row-balance")?.remove();
         const entry = el("div", { class: "accounts-entry" }, row);
+        if (Object.hasOwn(account, "identity_status")) {
+            const identity = ["confirmed", "unconfirmed"].includes(account.identity_status) ? account.identity_status : "unknown";
+            const check = ["match", "mismatch"].includes(account.identity_last_status) ? account.identity_last_status : "unknown";
+            const identityInfo = el("div", { class: "accounts-identity", "data-identity": identity, "data-identity-check": check }, [el("span", { text: t(`accounts.identity.${identity}`) }), el("span", { text: t("accounts.identity.last_check", { result: t(`accounts.identity.${check}`) }) })]);
+            if (account.identity_checked_at) identityInfo.append(el("time", { datetime: account.identity_checked_at, text: t("accounts.identity.checked_at", { date: i18n.formatDate(account.identity_checked_at), time: i18n.formatTime(account.identity_checked_at) }) }));
+            if (identity !== "confirmed") identityInfo.append(button(`accounts-enroll-${id}`, { labelKey: "accounts.enrollment.begin", variant: "ghost", disabled: locked, onClick: () => beginEnrollment(account) }));
+            entry.append(identityInfo);
+        }
         if (account.is_root) entry.append(el("p", { class: "accounts-help", text: t("accounts.root_pause") }));
         if (editId === account.id) {
             const save = () => action(account, "rename_account", { account_id: account.id, label: label.trim() }, "accounts.rename.saved");
@@ -140,9 +208,8 @@ export async function mount(view, ctx) {
         if (panel) root.append(panel);
         if (!loaded && error) root.append(c.emptyState.create({ titleKey: "accounts.load.title", action: { labelKey: "common.action.retry", onClick: () => { error = null; refresh(); } } }));
         else if (!accounts.length) root.append(c.emptyState.create({ icon: "accounts", titleKey: "accounts.empty.title", bodyKey: "accounts.empty.body", action: { labelKey: "accounts.empty.action", variant: "primary", onClick: () => router.navigate("#/setup/1") } }));
-        else root.append(el("div", { class: "accounts-list" }, [...accounts.map(accountEntry), ...invited.listItems(), disclosure("accounts.action.add_another", [el("p", { id: "accounts-add-reason", text: t("errors.app.accounts_add_unsupported") }), button("accounts-add-another", { labelKey: "accounts.action.add_another", disabled: true })])]));
+        else root.append(el("div", { class: "accounts-list" }, [...accounts.map(accountEntry), button("accounts-add-another", { labelKey: "accounts.enrollment.add", disabled: Boolean(busyId) || confirming || flow.pending || activeStates.has(flow.status?.state), onClick: () => addAccount() }), ...invited.listItems()]));
         if (accounts.length) root.append(invited.referralSection());
-        root.querySelector("#accounts-add-another")?.setAttribute("aria-describedby", "accounts-add-reason");
         const nextFocus = document.getElementById(focusId || focused);
         if (nextFocus && !nextFocus.disabled) nextFocus.focus({ preventScroll: true });
         else if (focused) (root.querySelector("#accounts-cancel-signin:not(:disabled), #accounts-retry-signin:not(:disabled), .account-row button:not(:disabled)") || view).focus({ preventScroll: true });

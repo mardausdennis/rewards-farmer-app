@@ -1,6 +1,12 @@
 {
   "namespace": "history",
   "messages": {
+    "history.account": {"text": "Account", "src": "fb2a1c8f"},
+    "history.account.all": {"text": "Tutti gli account", "src": "e1cce800"},
+    "history.account.ran": {"text": "Eseguito", "src": "2b3ec280"},
+    "history.account.skipped": {"text": "Saltato", "src": "55a21fdf"},
+    "history.account.failed": {"text": "Non riuscito", "src": "66daff25"},
+    "history.account.unknown": {"text": "Sconosciuto", "src": "aa6d855a"},
     "history.title": {"text": "Cronologia", "src": "ee7ea2a7"},
     "history.loading": {"text": "Apertura della cronologia", "src": "1b51a0b8"},
     "history.checks.latest": {"text": "Apri l'ultimo controllo", "src": "240765be"},

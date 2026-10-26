@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "Conferma gli account esistenti prima di aggiungerne un altro.", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "Prima conferma o annulla l'account in attesa di conferma.", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "Questa conferma è scaduta. Accedi di nuovo per confermare l'account.", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "Non è stato possibile salvare la conferma dell'account. Riprova.", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "Non è stato possibile leggere il nome dell'account Microsoft. Accedi di nuovo.", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "È connesso un altro account Microsoft. Accedi con l'account confermato.", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "Lo spostamento dell'account non è terminato. Prova ad aggiungere di nuovo l'account.", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "Questo account è stato saltato perché deve essere confermato in Account.", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "Questo account è stato saltato perché non è stato possibile verificare il suo nome Microsoft.", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "Questo account è stato saltato perché è connesso un altro account Microsoft.", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "Microsoft richiede a {account} di accettare le condizioni aggiornate. Scegli Accedi di nuovo, accetta le condizioni nella finestra che si apre, poi chiudila.", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "{account} non ha effettuato l'accesso a Microsoft. Apri Account e scegli Accedi di nuovo.", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "La pagina Rewards è rimasta vuota e non è stato possibile leggerne i dati. Il prossimo controllo riproverà.", "src": "c412ce65"},

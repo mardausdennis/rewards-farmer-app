@@ -1,6 +1,16 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_enrollment_required": {"text": "Confirmez les comptes existants avant d’en ajouter un autre.", "src": "38a2a24f"},
+    "errors.app.accounts_enrollment_pending": {"text": "Confirmez ou annulez d’abord le compte en attente de confirmation.", "src": "38877ef1"},
+    "errors.app.accounts_enrollment_expired": {"text": "Cette confirmation a expiré. Reconnectez-vous pour confirmer le compte.", "src": "c4a47edc"},
+    "errors.app.accounts_enrollment_save_failed": {"text": "La confirmation du compte n’a pas pu être enregistrée. Réessayez.", "src": "a8f1c738"},
+    "errors.app.accounts_identity_unreadable": {"text": "Le nom du compte Microsoft n’a pas pu être lu. Reconnectez-vous.", "src": "0ddcf691"},
+    "errors.app.accounts_identity_mismatch": {"text": "Un autre compte Microsoft est connecté. Connectez-vous avec le compte confirmé.", "src": "077780ff"},
+    "errors.app.accounts_migration_pending": {"text": "Le déplacement du compte n’est pas terminé. Réessayez d’ajouter le compte.", "src": "f6d72dda"},
+    "errors.browser.enrollment_required": {"text": "Ce compte a été ignoré, car il doit être confirmé dans Comptes.", "src": "918b23b2"},
+    "errors.browser.identity_unknown": {"text": "Ce compte a été ignoré, car son nom Microsoft n’a pas pu être vérifié.", "src": "fc008c24"},
+    "errors.browser.accounts.identity_mismatch": {"text": "Ce compte a été ignoré, car un autre compte Microsoft est connecté.", "src": "48b6d817"},
     "errors.state.terms_of_use": {"text": "{account}\u00a0: Microsoft demande d’accepter de nouvelles conditions. Choisissez Se reconnecter, acceptez les conditions dans la fenêtre qui s’ouvre, puis fermez-la.", "src": "38e75a70"},
     "errors.state.signed_out": {"text": "{account}\u00a0: ce compte est déconnecté de Microsoft. Ouvrez Comptes et choisissez Se reconnecter.", "src": "6b6e8ce9"},
     "errors.state.page_blank": {"text": "La page Rewards est restée vide et n’a pas pu être lue. La prochaine vérification réessaiera.", "src": "c412ce65"},

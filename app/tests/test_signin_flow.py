@@ -251,21 +251,60 @@ class SigninFlowTests(unittest.TestCase):
 		self.lock.release.assert_not_called()
 
 	def test_new_root_migration_precedes_edge(self):
+		import identity
 		(self.profile / "Local State").touch()
-		self.assertEqual(signin.run("account-2", True), 0)
+		self.admin._profile_identity = Mock(return_value={"name": "Synthetic Person"})
+		with patch.object(identity, "binding", return_value={"expected_name_hash": identity.name_hash("Synthetic Person")}), patch.object(identity, "read_dashboard_identity", return_value=("match", identity.name_hash("Synthetic Person"))), patch.object(identity, "stage_enrollment"):
+			self.assertEqual(signin.run("account-2", True, enroll=True), 0)
+		self.assertEqual(self.state("account-2")["state"], "awaiting_confirmation")
 		self.admin.migrate_root_profile.assert_called_once_with("account-2")
 		self.locks.acquire.assert_called_once_with("signin", account="account-2", directory=str(self.profile))
 
 	def test_migration_failure_maps_profile_in_use_and_releases(self):
+		import identity
 		(self.profile / "Local State").touch()
 		error = ValueError("locked")
 		error.code = "profile_in_use"
 		self.admin.migrate_root_profile.side_effect = error
-		with self.assertLogs("rfapp", "ERROR"):
-			self.assertEqual(signin.run("account-2", True), 1)
+		with self.assertLogs("rfapp", "ERROR"), patch.object(identity, "binding", return_value={"expected_name_hash": identity.name_hash("Synthetic Person")}):
+			self.assertEqual(signin.run("account-2", True, enroll=True), 1)
 		self.assertEqual(self.state("account-2")["error_code"], "profile_in_use")
 		self.edge_mock.assert_not_called()
 		self.lock.release.assert_called_once()
+
+	def test_enrollment_observation_needs_confirmation_and_never_registers_early(self):
+		import identity
+		(self.root / ".env").write_text("REWARDS_ACCOUNTS=account-1\nUSER_DATA_DIR=" + str(self.profile) + "\n")
+		self.admin._profile_identity = Mock(return_value={"name": "Synthetic Other Person"})
+		value = identity.load(self.root)
+		value["bindings"]["account-1"] = {"account_id": "account-1", "expected_name_hash": identity.name_hash("Synthetic Existing"), "confirmed_at": identity.utc()}
+		identity.save(value, self.root)
+		with patch.object(identity, "read_dashboard_identity", return_value=("match", identity.name_hash("Synthetic Other Person"))):
+			self.assertEqual(signin.run("account-2", True, enroll=True), 0)
+		self.assertEqual(self.state("account-2")["state"], "awaiting_confirmation")
+		self.assertEqual(identity.pending("account-2", self.root)["observed_name"], "Synthetic Other Person")
+		self.assertNotIn("account-2", (self.root / ".env").read_text())
+		self.assertNotIn("Synthetic Other Person", json.dumps(self.state("account-2")))
+		self.schedule.ensure.assert_not_called()
+
+	def test_unknown_dashboard_never_creates_pending_or_recycles_signed_in_bytes(self):
+		import identity
+		(self.profile / "account-1").mkdir()
+		(self.root / ".env").write_text("REWARDS_ACCOUNTS=account-1\nUSER_DATA_DIR=" + str(self.profile) + "\n")
+		self.admin._profile_identity = Mock(return_value={"name": "Synthetic Person"})
+		with patch.object(identity, "read_dashboard_identity", return_value=("unknown", None)):
+			self.assertEqual(signin.run("account-1", False, enroll=True), 1)
+		self.assertIsNone(identity.pending("account-1", self.root))
+		self.assertIsNone(identity.binding("account-1", self.root))
+		self.assertEqual(self.state()["error_code"], "identity_unknown")
+		self.admin._recycle.assert_not_called()
+
+	def test_second_account_without_enrollment_refused_before_browser_or_lock(self):
+		(self.root / ".env").write_text("REWARDS_ACCOUNTS=account-1\nUSER_DATA_DIR=" + str(self.profile) + "\n")
+		self.assertEqual(signin.run("account-2", True), 1)
+		self.assertEqual(self.state("account-2")["error_code"], "enrollment_required")
+		self.edge_mock.assert_not_called()
+		self.locks.acquire.assert_not_called()
 
 	def test_invalid_id_cannot_write_outside_runs(self):
 		for account_id in ("../outside", "@root"):

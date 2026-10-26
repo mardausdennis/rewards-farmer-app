@@ -1,6 +1,9 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.account.all": {"text": "所有帐户", "src": "e1cce800"},
+    "overview.account.open": {"text": "打开 {account}", "src": "1e126529"},
+    "overview.streaks.unknown": {"text": "连续记录未知", "src": "2e704ef8"},
     "overview.title": {"text": "概览", "src": "fb6819e9"},
     "overview.date_today": {"text": "今天", "src": "9fc3002e"},
     "overview.tasks_today": {"text": "今日任务", "src": "ee3de2e7"},

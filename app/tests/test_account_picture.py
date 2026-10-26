@@ -122,7 +122,7 @@ class AccountPictureTests(unittest.TestCase):
 		with patch.object(admin, "_open_shared", side_effect=AssertionError("List may not read picture bytes")), patch.object(admin, "_decode_picture", side_effect=AssertionError("List may not decode")):
 			row = admin.list_accounts()["accounts"][0]
 		self.assertRegex(row["picture_rev"], r"^[0-9a-f]{16}$")
-		self.assertEqual(set(row), {"id", "label", "dir", "paused", "is_root", "signed_in", "balance", "balance_at", "last_run_at", "last_result", "email", "name", "picture_rev"})
+		self.assertEqual(set(row), {"id", "label", "dir", "paused", "is_root", "signed_in", "balance", "balance_at", "last_run_at", "last_result", "email", "name", "picture_rev", "identity_status", "identity_confirmed_at", "identity_last_status", "identity_checked_at"})
 		self.assertNotIn("data_url", row)
 		self.assertEqual(row["picture_rev"], admin.get_account_picture("account-1")["rev"])
 		self.assertTrue(path.exists())

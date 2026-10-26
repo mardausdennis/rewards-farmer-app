@@ -8,7 +8,7 @@ from pathlib import Path
 import threading
 from typing import Callable
 
-from rfapp import paths, streaks
+from rfapp import account_history, paths, streaks
 import run_lock
 import run_record
 import stats_ledger
@@ -73,11 +73,12 @@ def _deferred(events):
 	return value
 
 
-def load_run(run_id: str, labels: dict[str, str], user_data_dir: str) -> dict:
+def load_run(run_id: str, labels: dict[str, str], user_data_dir: str, *, account_id=None, history_aliases=None) -> dict:
 	path = _path(run_id)
 	if not path.is_file():
 		raise FileNotFoundError(run_id)
 	events = run_record.read_events(str(path))
+	rules = account_history.aliases(history_aliases)
 	start = next((event for event in events if event.get("type") == "run_start"), {})
 	end = next((event for event in reversed(events) if event.get("type") == "run_end"), None)
 	deferred = _deferred(events)
@@ -94,6 +95,8 @@ def load_run(run_id: str, labels: dict[str, str], user_data_dir: str) -> dict:
 		"result_key": stats_ledger.result_key(result, events), "points_earned": None, "stop_requested": False,
 		"accounts": [], "warnings": [], "log_size": log_size, "deferred": deferred if not unknown else None}
 	if unknown:
+		if account_id is not None:
+			raise FileNotFoundError(run_id)
 		return detail
 	profiles = {event.get("account"): event.get("profile") for event in events if event.get("type") == "account_start"}
 	by_name = {}
@@ -101,8 +104,8 @@ def load_run(run_id: str, labels: dict[str, str], user_data_dir: str) -> dict:
 	last_task_balance = {}
 	def account(name):
 		if name not in by_name:
-			account_id = _account_id(name, profiles.get(name), user_data_dir)
-			row = {"account_id": account_id, "label": _label(account_id, labels, len(by_name) + 1), "status": "pending", "decision": None,
+			identity = account_history.resolve(_account_id(name, profiles.get(name), user_data_dir), detail["started_at"], rules)
+			row = {"account_id": identity, "label": _label(identity, labels, len(by_name) + 1), "status": "pending", "decision": None,
 				"state_before": None, "state_after": None, "points_now": None, "points_earned": None, "search": None, "error": None,
 				"tasks": [_task(task_id) for task_id in _TASK_IDS]}
 			by_name[name] = row
@@ -153,7 +156,7 @@ def load_run(run_id: str, labels: dict[str, str], user_data_dir: str) -> dict:
 			row["search"] = {"earned": event.get("earned"), "max": event.get("max")}
 		elif type == "account_end":
 			if event.get("error_code"):
-				row["status"] = "failed"
+				row["status"] = "skipped" if event["error_code"] in account_history.IDENTITY_ERRORS else "failed"
 				if row["error"] is None:
 					code = event["error_code"]
 					row["error"] = {"code": code, "message_key": "errors.run.failed", "detail": event.get("detail")}
@@ -185,6 +188,8 @@ def load_run(run_id: str, labels: dict[str, str], user_data_dir: str) -> dict:
 			daily = stats_ledger._daily_delta([event for event in events if event.get("account") == name])
 			if daily is not None:
 				row["points_earned"] = daily
+		if account_history.identity_skipped_before_tasks(own):
+			row["points_earned"] = 0
 		if not active:
 			for task in row["tasks"]:
 				if task["status"] in ("pending", "running"):
@@ -193,8 +198,21 @@ def load_run(run_id: str, labels: dict[str, str], user_data_dir: str) -> dict:
 				row["status"] = "failed"
 	if by_name and all(row["decision"] and row["decision"]["run"] is False for row in by_name.values()):
 		detail["kind"] = "check"
-	known = [row["points_earned"] for row in by_name.values() if row["points_earned"] is not None]
-	detail["points_earned"] = sum(known) if known else None
+	if account_id is not None:
+		selected = [(name, row) for name, row in by_name.items() if row["account_id"] == account_id]
+		if not selected:
+			raise FileNotFoundError(run_id)
+		detail["accounts"] = [row for _, row in selected]
+		detail["warnings"] = [warning for warning in detail["warnings"] if warning["account_id"] in (None, account_id)]
+		if len(by_name) > 1 or any(event.get("error_code") in account_history.IDENTITY_ERRORS for event in events):
+			own = [event for event in events if event.get("account") in {name for name, _ in selected}]
+			detail["result"] = account_history.outcome(own, result, active=active, check_only=start.get("plan", {}).get("check_only", False))
+			detail["result_key"] = stats_ledger.result_key(detail["result"], own)
+			detail["kind"] = "check" if detail["result"] in ("checked", "skipped") else "run"
+			ends = [event for event in own if event.get("type") == "account_end"]
+			detail["duration_ms"] = sum(event["duration_ms"] for event in ends) if ends and all(stats_ledger._number(event.get("duration_ms")) for event in ends) else None
+	values = [row["points_earned"] for row in detail["accounts"]]
+	detail["points_earned"] = sum(values) if values and all(value is not None for value in values) else None
 	return detail
 
 
@@ -208,8 +226,11 @@ def _summary(detail):
 	return summary
 
 
-def history(limit: int = 50, before: str | None = None, include_checks: bool = True, labels=None, user_data_dir=None) -> dict:
+def history(limit: int = 50, before: str | None = None, include_checks: bool = True, labels=None, user_data_dir=None, *, account_id=None, history_aliases=None) -> dict:
 	labels = labels or {}
+	if history_aliases is None:
+		from rfapp import prefs
+		history_aliases = prefs.load().get("history_aliases", [])
 	if user_data_dir is None:
 		from rfapp import settings
 		user_data_dir = str(settings.user_data_dir())
@@ -218,7 +239,7 @@ def history(limit: int = 50, before: str | None = None, include_checks: bool = T
 		if before is not None and run_id >= before:
 			continue
 		try:
-			detail = load_run(run_id, labels, user_data_dir)
+			detail = load_run(run_id, labels, user_data_dir, account_id=account_id, history_aliases=history_aliases)
 		except FileNotFoundError:
 			continue
 		if include_checks or detail["kind"] != "check":
@@ -229,12 +250,20 @@ def history(limit: int = 50, before: str | None = None, include_checks: bool = T
 	return {"runs": page, "next_before": page[-1]["run_id"] if len(items) > limit and page else None}
 
 
-def overview(settings: dict, prefs: dict, now: datetime) -> dict:
+def overview(settings: dict, prefs: dict, now: datetime, account_id=None) -> dict:
 	from rfapp import settings as settings_module
+	selected_account = account_id
 	active_ids = settings_module.active_accounts()
 	paused_ids = settings_module.paused_accounts()
+	if account_id is not None:
+		if account_id not in active_ids + paused_ids:
+			raise ValueError("accounts.unknown")
+		active_ids = [value for value in active_ids if value == account_id]
+		paused_ids = [value for value in paused_ids if value == account_id]
 	user_data_dir = str(settings_module.user_data_dir())
 	labels = prefs.get("account_labels", {})
+	aliases = prefs.get("history_aliases", [])
+	rules = account_history.aliases(aliases)
 	today = now.astimezone().date()
 	dates = [today - timedelta(days=29 - index) for index in range(30)]
 	data = {account_id: {"states": [], "balances": {}, "daily_states": {}, "earned": {}, "tasks": {}} for account_id in active_ids + paused_ids}
@@ -242,13 +271,13 @@ def overview(settings: dict, prefs: dict, now: datetime) -> dict:
 	last_run = None
 	for run_id in reversed(run_record.list_run_ids(str(paths.runs_dir()))):
 		try:
-			detail = load_run(run_id, labels, user_data_dir)
+			detail = load_run(run_id, labels, user_data_dir, account_id=selected_account, history_aliases=aliases)
 		except FileNotFoundError:
 			continue
 		last_run = _summary(detail)
 		if detail["result"] == "unknown":
 			continue
-		events = run_record.read_events(str(_path(run_id)))
+		events = account_history.project_events(run_record.read_events(str(_path(run_id))), user_data_dir, rules)
 		records[run_id] = events
 		profiles = {event.get("account"): event.get("profile") for event in events if event.get("type") == "account_start"}
 		for event in events:
@@ -318,8 +347,12 @@ def overview(settings: dict, prefs: dict, now: datetime) -> dict:
 		values = [row["state"].get(field) if row["state"] else None for row in rows if not row["paused"]]
 		totals[field] = sum(values) if values and all(value is not None for value in values) else None
 	info = run_lock.status(directory=user_data_dir)
-	return {"accounts": rows, "totals": totals, "active_run": {"run_id": info.run_id, "since": info.since} if info and info.owner == "farmer" else None, "last_run": last_run,
-		"streaks": streaks.latest(active_ids + paused_ids, user_data_dir, now)}
+	result = {"accounts": rows, "totals": totals, "active_run": {"run_id": info.run_id, "since": info.since} if info and info.owner == "farmer" else None, "last_run": last_run,
+		"streaks": streaks.latest(active_ids + paused_ids, user_data_dir, now, history_aliases=aliases)}
+	if len(rows) > 1:
+		result["streaks_by_account"] = streaks.latest_by_account(active_ids + paused_ids, user_data_dir, now, history_aliases=aliases)
+		result["streaks"] = None
+	return result
 
 
 class LiveTail:

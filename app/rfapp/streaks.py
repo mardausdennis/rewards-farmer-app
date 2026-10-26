@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 import re
 
-from rfapp import paths
+from rfapp import account_history, paths
 import run_record
 import stats_ledger
 
@@ -78,13 +78,14 @@ def parse(capture, account_id):
 		"big_bonus": {"points": _integer(bonus[0]) if bonus else None, "stamps_total": int(stamps[0]) if stamps else None, "stamps_collected": collected}, "items": items}
 
 
-def latest(account_ids, user_data_dir, now):
+def latest(account_ids, user_data_dir, now, *, history_aliases=None):
 	"""Read backward and stop at the first successful selected-account capture."""
 	selected = set(account_ids)
+	rules = account_history.aliases(history_aliases)
 	if not selected:
 		return None
 	for run_id in run_record.list_run_ids(str(paths.runs_dir())):
-		events = run_record.read_events(str(paths.runs_dir() / (run_id + ".jsonl")))
+		events = account_history.project_events(run_record.read_events(str(paths.runs_dir() / (run_id + ".jsonl"))), user_data_dir, rules)
 		profiles = {event.get("account"): event.get("profile") for event in events if event.get("type") == "account_start"}
 		captures = []
 		for event in events:
@@ -104,3 +105,10 @@ def latest(account_ids, user_data_dir, now):
 			_, event, account = max(captures, key=lambda value: (value[0], value[1].get("phase") == "after"))
 			return parse(event, account)
 	return None
+
+
+def latest_by_account(account_ids, user_data_dir, now, *, history_aliases=None):
+	if history_aliases is None:
+		from rfapp import prefs
+		history_aliases = prefs.load().get("history_aliases", [])
+	return {account: latest([account], user_data_dir, now, history_aliases=history_aliases) for account in dict.fromkeys(account_ids)}

@@ -115,6 +115,38 @@ class StatsSourceTests(unittest.TestCase):
 
 @unittest.skipUnless(_enabled,"Run through guarded parent UI overlay")
 class StatsTests(unittest.TestCase):
+	def test_f108_unknown_totals_scope_and_single_pin(self):
+		self.open('single');self.js("assert(!document.getElementById('stats-account')&&document.querySelectorAll('.stats-metric').length===3,'F108 single structure unchanged')")
+		_harness.open('#/stats','accounts/multi-account').wait_ready()
+		WebDriverWait(_harness.driver,10).until(lambda d:d.execute_script("return Boolean(document.getElementById('stats-account'))"))
+		self.js("""
+		 const wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await pause(10)}throw Error('F108 stats timeout')};
+		 assert(document.getElementById('stats-account').value==='all'&&document.getElementById('stats-account').options.length===3,'F108 all default no notes');
+		 assert(document.querySelectorAll('.stats-metric-value.is-unknown').length===2,'F108 null period totals visible, known streak unchanged');
+		 assert(!document.querySelector('.stats-metrics').textContent.includes('99,999'),'F108 measured earned never full total');
+		 const calls=[],original=window.pywebview.api.get_stats;window.pywebview.api.get_stats=async request=>{calls.push(request);return original(request)};
+		 let select=document.getElementById('stats-account');select.value='account-1';select.dispatchEvent(new Event('change'));
+		 await wait(()=>calls.some(req=>req.account_id==='account-1')&&!document.querySelector('.stats-metric-value.is-unknown'));
+		 select=document.getElementById('stats-account');select.value='account-2';select.dispatchEvent(new Event('change'));
+		 await wait(()=>calls.some(req=>req.account_id==='account-2')&&document.querySelector('.stats-metric-value.is-unknown'));
+		 assert(document.getElementById('stats-account').options.length===3,'F108 choices retained');
+		 let release;window.pywebview.api.get_stats=async request=>request.account_id==='account-1'?new Promise(resolve=>{release=()=>original(request).then(resolve)}):original(request);
+		 select=document.getElementById('stats-account');select.value='account-1';select.dispatchEvent(new Event('change'));await wait(()=>release);
+		 assert(!document.querySelector('.stats-metrics'),'F108 prior account totals hidden while loading');
+		 select=document.getElementById('stats-account');select.value='account-2';select.dispatchEvent(new Event('change'));await wait(()=>document.querySelector('.stats-metric-value.is-unknown'));release();await pause(30);
+		 assert(document.getElementById('stats-account').value==='account-2'&&document.querySelectorAll('.stats-metric-value.is-unknown').length===2,'F108 late other account response ignored');
+		 """)
+		self.assertEqual([], _harness.errors())
+
+	def test_f108_stats_captures(self):
+		for theme in ('light','dark'):
+			for width,height in ((1280,800),(860,600)):
+				_harness.viewport(width,height);_harness.open('#/stats','accounts/multi-account',theme).wait_ready()
+				WebDriverWait(_harness.driver,10).until(lambda d:d.execute_script("return Boolean(document.getElementById('stats-account'))"))
+				self.js("const wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await pause(10)}throw Error('F108 stats capture timeout')};const select=document.getElementById('stats-account');select.value='account-2';select.dispatchEvent(new Event('change'));await wait(()=>s.get('stats')?.account_id==='account-2'&&document.querySelector('.stats-metric-value.is-unknown'));assert(document.getElementById('stats-account').value==='account-2','F108 per-account unknown');assert(document.documentElement.scrollWidth<=innerWidth+1,'F108 stats fits')")
+				if os.environ.get('RF_F108_CAPTURE'):_harness.driver.save_screenshot(str(Path(os.environ['RF_F108_CAPTURE'])/f'stats-{theme}-{width}x{height}.png'))
+		_harness.viewport(1280,800)
+
 	def test_f77_capture(self):
 		requested = os.environ.get("RF_F77_CAPTURE")
 		if not requested:
