@@ -11,6 +11,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from rfapp import __version__
+
 
 class UpdateTests(unittest.TestCase):
 	def setUp(self):
@@ -29,17 +31,30 @@ class UpdateTests(unittest.TestCase):
 		self.get = self.http.start()
 		self.addCleanup(self.http.stop)
 		self.get.return_value = Mock(status_code=200)
-		self.get.return_value.json.return_value = {"tag_name": "v0.2.0", "html_url": "https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0", "draft": False, "prerelease": False}
+		major, minor, _patch = map(int, __version__.split("."))
+		self.newer_version = f"{major}.{minor + 1}.0"
+		self.release_url = f"https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v{self.newer_version}"
+		self.get.return_value.json.return_value = {"tag_name": "v" + self.newer_version, "html_url": self.release_url, "draft": False, "prerelease": False}
 
 	def test_new_release_and_headers(self):
 		result = self.module.check()
 		self.assertTrue(result["available"])
-		self.assertEqual(result["latest"], "0.2.0")
-		self.assertEqual(result["url"], "https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0")
+		self.assertGreater(self.module._version(self.newer_version), self.module._version(__version__))
+		self.assertEqual(result["latest"], self.newer_version)
+		self.assertEqual(result["url"], self.release_url)
 		self.assertEqual(self.get.call_args.args, ("https://api.github.com/repos/mardausdennis/rewards-farmer-app/releases/latest",))
 		self.assertEqual(self.get.call_args.kwargs["timeout"], 10)
 		self.assertEqual(self.get.call_args.kwargs["headers"]["Accept"], "application/vnd.github+json")
 		self.assertNotIn("Authorization", self.get.call_args.kwargs["headers"])
+
+	def test_same_and_older_releases_are_not_available(self):
+		for version in (__version__, "0.0.0"):
+			with self.subTest(version=version):
+				self.get.return_value.json.return_value = {"tag_name": "v" + version, "html_url": f"https://github.com/mardausdennis/rewards-farmer-app/releases/tag/v{version}", "draft": False, "prerelease": False}
+				result = self.module.check(force=True)
+				self.assertFalse(result["available"])
+				self.assertEqual(result["latest"], version)
+				self.assertIsNone(result["url"])
 
 	def test_numeric_version(self):
 		self.assertGreater(self.module._version("v1.10.0"), self.module._version("1.9.99"))
@@ -68,7 +83,7 @@ class UpdateTests(unittest.TestCase):
 		self.assertTrue(self.module.check()["available"])
 
 	def test_dismissed_version(self):
-		self.p["update_dismissed_version"] = "0.2.0"
+		self.p["update_dismissed_version"] = self.newer_version
 		self.assertFalse(self.module.check()["available"])
 
 	def test_draft_and_prerelease(self):
@@ -86,11 +101,11 @@ class UpdateTests(unittest.TestCase):
 
 	def test_untrusted_release_page_fails_closed(self):
 		for url in (
-			"https://github.com/attacker/project/releases/tag/v0.2.0",
-			"https://github.com/User0332/rewards-farmer/releases/tag/v0.2.0",
-			"http://github.com/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0",
-			"https://github.com.evil.test/mardausdennis/rewards-farmer-app/releases/tag/v0.2.0",
-			"https://github.com/mardausdennis/rewards-farmer-app-other/releases/tag/v0.2.0",
+			f"https://github.com/attacker/project/releases/tag/v{self.newer_version}",
+			f"https://github.com/User0332/rewards-farmer/releases/tag/v{self.newer_version}",
+			f"http://github.com/mardausdennis/rewards-farmer-app/releases/tag/v{self.newer_version}",
+			f"https://github.com.evil.test/mardausdennis/rewards-farmer-app/releases/tag/v{self.newer_version}",
+			f"https://github.com/mardausdennis/rewards-farmer-app-other/releases/tag/v{self.newer_version}",
 		):
 			with self.subTest(url=url):
 				self.get.return_value.json.return_value["html_url"] = url
@@ -168,7 +183,7 @@ class UpdateTests(unittest.TestCase):
 				self.assertEqual(state["goals"], {"account-1": 1000})
 				self.assertEqual(state["synthetic_saved_setting"], "errors")
 				self.assertEqual(state["update_last_checked"], results["update"]["data"]["checked_at"])
-				self.assertEqual(self.module._cached["latest"], "0.2.0")
+				self.assertEqual(self.module._cached["latest"], self.newer_version)
 
 	def test_request_releases_default_lock_and_observes_later_dismissal(self):
 		entered, release, probe_done = (threading.Event() for _ in range(3))
@@ -183,7 +198,7 @@ class UpdateTests(unittest.TestCase):
 		worker = threading.Thread(target=lambda: result.update(self.module.check()))
 		def probe():
 			with self.module._lock:
-				self.p["update_dismissed_version"] = "0.2.0"
+				self.p["update_dismissed_version"] = self.newer_version
 				probe_done.set()
 		other = threading.Thread(target=probe)
 		worker.start()
@@ -198,7 +213,7 @@ class UpdateTests(unittest.TestCase):
 				other.join(4)
 		self.assertFalse(worker.is_alive())
 		self.assertFalse(other.is_alive())
-		self.assertEqual(result["latest"], "0.2.0")
+		self.assertEqual(result["latest"], self.newer_version)
 		self.assertFalse(result["available"])
 
 	def test_preference_transactions_and_result_cache_use_passed_lock(self):
