@@ -128,7 +128,7 @@ export function invitations(ctx, changed) {
         if (loading) { section.append(c.spinner.create({ labelKey: "common.action.working" })); return section; }
         if (referralError) { section.append(c.banner.create({ tone: "error", messageKey: referralError.messageKey, params: referralError.params, actions: [{ labelKey: "common.action.retry", onClick: load }] })); return section; }
         if (!referral) return section;
-        if (typeof referral.link === "string" && referral.link && referral.unreadable === null) {
+        if (typeof referral.link === "string" && referral.link) {
             const field = c.textField.create({ id: "accounts-referral-link", labelKey: "accounts.referrals.link", value: referral.link });
             const input = field.querySelector("input");
             input.readOnly = true;

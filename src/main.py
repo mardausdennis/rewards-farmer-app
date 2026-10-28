@@ -94,7 +94,7 @@ def _record_referrals(driver, account):
 	try:
 		state = referrals.read_referral_page(driver)
 	except Exception:
-		state = referrals.ReferralState(unreadable="read_failed")
+		state = referrals.ReferralState(unreadable="read_failed", reason="read_failed")
 	try:
 		# Leaving the referral page avoids its observed slow browser shutdown.
 		driver.get("https://rewards.bing.com/")
@@ -109,7 +109,8 @@ def _record_referrals(driver, account):
 		state = dataclasses.replace(state, unreadable="storage_failed")
 	# The correlated run event deliberately never carries the link or exception text.
 	run_record.emit("referral_state", account=account.name, account_id=account_id, read_at=read_at, link_found=state.link_found,
-		referrals=state.referrals, friends=None if state.friends is None else len(state.friends), unreadable=state.unreadable)
+		referrals=state.referrals, friends=None if state.friends is None else len(state.friends), unreadable=state.unreadable,
+		reason=state.reason if isinstance(state.reason, str) and state.reason in referrals.REASON_CODES else None)
 
 
 def run_account(account: accounts.Account) -> bool:

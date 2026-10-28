@@ -41,7 +41,22 @@ class Driver:
 
 	def execute_script(self, script):
 		self.scripts.append(script)
+		if script == referrals._READY:
+			return {"ready": True}
 		return self.raw
+
+
+class Clock:
+	def __init__(self):
+		self.now = 0.0
+		self.sleeps = []
+
+	def monotonic(self):
+		return self.now
+
+	def sleep(self, seconds):
+		self.sleeps.append(seconds)
+		self.now += seconds
 
 
 class ReferralReaderTests(unittest.TestCase):
@@ -50,7 +65,7 @@ class ReferralReaderTests(unittest.TestCase):
 		state = referrals.read_referral_page(driver)
 		self.assertEqual(state, referrals.ReferralState(LINK, True))
 		self.assertEqual(driver.loads, [referrals.TARGET])
-		self.assertEqual(driver.scripts, [referrals._SNAPSHOT])
+		self.assertEqual(driver.scripts, [referrals._READY, referrals._SNAPSHOT])
 		self.assertIsNone(state.referrals)
 		self.assertIsNone(state.friends)
 		self.assertNotIn(LINK, repr(state))
@@ -100,6 +115,7 @@ class ReferralReaderTests(unittest.TestCase):
 			driver = Driver()
 			loggers = [logging.getLogger(name) for name in ("selenium.webdriver.remote.remote_connection", "urllib3.connectionpool")]
 			def extract(script):
+				if script == referrals._READY: return {"ready": True}
 				for logger in loggers:
 					logger.debug("Private link: %s", LINK)
 				if failing:
@@ -120,10 +136,117 @@ class ReferralReaderTests(unittest.TestCase):
 	def test_location_changes_during_extraction_discard_private_link(self):
 		driver = Driver()
 		def extract(script):
+			if script == referrals._READY: return {"ready": True}
 			driver.current_url = "https://login.live.com/"
 			return {"link": LINK}
 		driver.execute_script = extract
-		self.assertEqual(referrals.read_referral_page(driver), referrals.ReferralState(unreadable="signed_out"))
+		self.assertEqual(referrals.read_referral_page(driver), referrals.ReferralState(unreadable="signed_out", reason="location"))
+
+	def test_waits_for_root_readiness_and_unique_button_before_one_snapshot(self):
+		clock, driver = Clock(), Driver()
+		answers = iter([{"error": "page_unknown", "reason": reason} for reason in ("no_main", "not_complete", "no_copy_button")] + [{"error": "link_ambiguous", "reason": "copy_button_ambiguous"}, {"ready": True}])
+		probes = []
+		def extract(script):
+			driver.scripts.append(script)
+			if script == referrals._READY:
+				probes.append(clock.now)
+				return next(answers)
+			return {"link": LINK}
+		driver.execute_script = extract
+		with patch.object(referrals, "time", clock):
+			state = referrals.read_referral_page(driver)
+		self.assertEqual(state, referrals.ReferralState(LINK, True))
+		self.assertEqual(driver.loads, [referrals.TARGET])
+		self.assertEqual(driver.scripts.count(referrals._SNAPSHOT), 1)
+		self.assertEqual(probes, [0, .25, .5, .75, 1])
+		self.assertEqual(clock.sleeps, [.25] * 4)
+
+	def test_wait_timeout_is_fifteen_seconds_without_navigation_or_snapshot_retry(self):
+		for code, reason in (("page_unknown", "no_main"), ("page_unknown", "not_complete"), ("page_unknown", "no_copy_button"), ("link_ambiguous", "copy_button_ambiguous")):
+			with self.subTest(reason=reason):
+				clock, driver = Clock(), Driver()
+				driver.execute_script = Mock(return_value={"error": code, "reason": reason})
+				with patch.object(referrals, "time", clock):
+					state = referrals.read_referral_page(driver)
+				self.assertEqual((state.unreadable, state.reason), (code, reason))
+				self.assertFalse(state.link_found)
+				self.assertEqual(clock.now, 15)
+				self.assertEqual(clock.sleeps, [.25] * 60)
+				self.assertEqual(driver.execute_script.call_count, 60)
+				self.assertTrue(all(call.args == (referrals._READY,) for call in driver.execute_script.call_args_list))
+				self.assertEqual(driver.loads, [referrals.TARGET])
+
+	def test_slow_readiness_respects_remaining_transport_budget_and_cannot_return_late_success(self):
+		clock, driver = Clock(), Driver()
+		connection = SimpleNamespace(_client_config=SimpleNamespace(timeout="original"), _conn=SimpleNamespace(request=Mock()))
+		driver.command_executor = connection
+		budgets = []
+		def extract(script):
+			budgets.append(connection._client_config.timeout.total)
+			clock.now += connection._client_config.timeout.total
+			return {"error": "page_unknown", "reason": "not_complete"}
+		driver.execute_script = extract
+		with patch.object(referrals, "time", clock):
+			state = referrals.read_referral_page(driver)
+		self.assertEqual((state.unreadable, state.reason), ("page_unknown", "not_complete"))
+		self.assertEqual(clock.now, 15)
+		self.assertEqual(budgets, [2] * 6 + [1.5])
+		self.assertEqual(connection._client_config.timeout, "original")
+
+	def test_command_timeouts_and_no_transport_retries_restore_caller_setup(self):
+		driver = Driver()
+		request = Mock(return_value="synthetic")
+		connection = SimpleNamespace(_client_config=SimpleNamespace(timeout="original"), _conn=SimpleNamespace(request=request))
+		driver.command_executor = connection
+		budgets = []
+		def get(url):
+			driver.loads.append(url)
+			budgets.append(connection._client_config.timeout.total)
+			connection._conn.request("GET", "synthetic", retries=10)
+		def extract(script):
+			budgets.append(connection._client_config.timeout.total)
+			return {"ready": True} if script == referrals._READY else {"link": LINK}
+		driver.get, driver.execute_script = get, extract
+		self.assertTrue(referrals.read_referral_page(driver).link_found)
+		self.assertEqual(budgets, [65, 2, 8])
+		self.assertEqual(request.call_args.kwargs["retries"], False)
+		self.assertIs(connection._conn.request, request)
+		self.assertEqual(connection._client_config.timeout, "original")
+		with patch.object(driver, "get", side_effect=RuntimeError(LINK)):
+			self.assertEqual(referrals.read_referral_page(driver).unreadable, "read_failed")
+		self.assertEqual(connection._client_config.timeout, "original")
+		self.assertIs(connection._conn.request, request)
+
+	def test_all_page_unknown_branches_have_bounded_reasons_and_untrusted_details_are_dropped(self):
+		for reason in ("too_many_controls", "no_main", "not_complete", "no_copy_button"):
+			clock, driver = Clock(), Driver()
+			driver.execute_script = Mock(return_value={"error": "page_unknown", "reason": reason, "text": LINK, "count": 9999999})
+			with patch.object(referrals, "time", clock):
+				state = referrals.read_referral_page(driver)
+			self.assertEqual((state.unreadable, state.reason), ("page_unknown", reason))
+			self.assertNotIn(LINK, repr(state))
+			self.assertNotIn("9999999", repr(state))
+		self.assertEqual(referrals.read_referral_page(Driver(url="https://private.invalid/?secret=SYNTHETIC")).reason, "location")
+		for raw in ([], {"error": [LINK]}, {"error": LINK, "reason": LINK}):
+			driver = Driver(raw=raw)
+			state = referrals.read_referral_page(driver)
+			self.assertEqual(state.unreadable, "page_unknown")
+			self.assertNotIn(LINK, repr(state))
+
+	def test_password_login_challenge_or_excess_controls_stop_wait_without_snapshot(self):
+		for raw in ({"error": "signed_out"}, {"error": "challenge"}, {"error": "page_unknown", "reason": "too_many_controls"}):
+			clock, driver = Clock(), Driver()
+			driver.execute_script = Mock(return_value=raw)
+			with patch.object(referrals, "time", clock):
+				state = referrals.read_referral_page(driver)
+			self.assertEqual(state.unreadable, raw["error"])
+			self.assertEqual(driver.execute_script.call_count, 1)
+			self.assertEqual(clock.sleeps, [])
+
+	def test_single_snapshot_can_still_report_changed_readiness(self):
+		driver = Driver(raw={"error": "page_unknown", "reason": "no_main"})
+		self.assertEqual(referrals.read_referral_page(driver).reason, "no_main")
+		self.assertEqual(driver.scripts, [referrals._READY, referrals._SNAPSHOT])
 
 	def test_real_javascript_uses_copy_label_nearest_input_without_effects(self):
 		node = shutil.which("node")
@@ -146,12 +269,29 @@ global.location={assign:fail,replace:fail};
 const result=new Function(payload.script)();
 process.stdout.write(JSON.stringify({result,effects}));
 """
-		for mode, expected in (({}, {"link": LINK}), ({"ambiguous": True}, {"error": "link_ambiguous"}), ({"missing": True}, {"error": "link_missing"}), ({"gate": "password"}, {"error": "signed_out"}), ({"gate": "login"}, {"error": "signed_out"}), ({"gate": "challenge"}, {"error": "challenge"}), ({"gate": "unknown"}, {"link": LINK})):
+		for mode, expected in (({}, {"link": LINK}), ({"ambiguous": True}, {"error": "link_ambiguous", "reason": "input_ambiguous"}), ({"missing": True}, {"error": "link_missing", "reason": "input_missing"}), ({"gate": "password"}, {"error": "signed_out"}), ({"gate": "login"}, {"error": "signed_out"}), ({"gate": "challenge"}, {"error": "challenge"}), ({"gate": "unknown"}, {"link": LINK})):
 			payload = {"script": referrals._SNAPSHOT, "link": LINK, **mode}
 			env = {key: value for key, value in os.environ.items() if key not in ("NODE_OPTIONS", "NODE_PATH")}
 			result = subprocess.run([node, "-e", wrapper], input=json.dumps(payload), text=True, encoding="utf-8", capture_output=True, timeout=8, env=env)
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertEqual(json.loads(result.stdout), {"result": expected, "effects": 0})
+
+	def test_real_javascript_readiness_and_snapshot_report_each_page_unknown_branch(self):
+		node = shutil.which("node")
+		self.assertIsNotNone(node)
+		wrapper = r"""
+const fs=require('fs'),p=JSON.parse(fs.readFileSync(0,'utf8'));
+const copy={tagName:'BUTTON',textContent:'Copy link',getAttribute:k=>null};
+const root={querySelectorAll:s=>p.branch==='no_copy_button'?[]:[copy]};
+global.document={readyState:p.branch==='not_complete'?'interactive':'complete',querySelector:s=>p.branch==='no_main'?null:root,querySelectorAll:s=>p.branch==='too_many_controls'?Array(401).fill(copy):[copy]};
+process.stdout.write(JSON.stringify(new Function(p.script)()));
+"""
+		for script in (referrals._READY, referrals._SNAPSHOT):
+			for branch in ("too_many_controls", "no_main", "not_complete", "no_copy_button"):
+				result = subprocess.run([node, "-e", wrapper], input=json.dumps({"script": script, "branch": branch}), text=True, encoding="utf-8", capture_output=True, timeout=8,
+					env={key: value for key, value in os.environ.items() if key not in ("NODE_OPTIONS", "NODE_PATH")})
+				self.assertEqual(result.returncode, 0, "synthetic JavaScript failed")
+				self.assertEqual(json.loads(result.stdout), {"error": "page_unknown", "reason": branch})
 
 
 class ReferralStoreTests(unittest.TestCase):
@@ -180,6 +320,63 @@ class ReferralStoreTests(unittest.TestCase):
 		self.assertIsNone(referrals.get_referral_info("other", directory=self.home)["link"])
 		self.assertNotIn(LINK, (self.home / "runs" / (RUN + ".jsonl")).read_text())
 
+	def test_failed_and_invalid_reads_retain_good_link_and_its_own_timestamp(self):
+		self.save(stamp="2026-10-25T22:00:00Z")
+		self.save("two", referrals.ReferralState("https://rewards.bing.com/refer?code=SYNTHETIC_TWO", True))
+		for state in (referrals.ReferralState(unreadable="page_unknown", reason="no_copy_button"), referrals.ReferralState("https://private.invalid/", True), referrals.ReferralState(None, True)):
+			self.save(state=state)
+			stored = json.loads((self.home / "referral.json").read_text())["accounts"]["one"]
+			self.assertEqual(stored["link"], LINK)
+			self.assertEqual(stored["link_read_at"], "2026-10-25T22:00:00Z")
+			self.assertEqual(stored["last_attempt_at"], AT)
+			self.assertNotIn("read_at", stored)
+			value = referrals.get_referral_info("one", directory=self.home)
+			self.assertEqual((value["link"], value["link_found"], value["read_at"]), (LINK, True, "2026-10-25T22:00:00Z"))
+			self.assertEqual(value["unreadable"], state.unreadable or ("link_invalid" if state.link else "link_missing"))
+		self.assertEqual(referrals.get_referral_info("two", directory=self.home)["link"], "https://rewards.bing.com/refer?code=SYNTHETIC_TWO")
+		self.assertIsNone(referrals.get_referral_info("three", directory=self.home)["link"])
+
+	def test_good_read_after_failure_replaces_link_and_clears_attempt_error(self):
+		self.save(stamp="2026-10-25T22:00:00Z")
+		self.save(state=referrals.ReferralState(unreadable="page_unknown"))
+		replacement = "https://rewards.bing.com/refer?code=SYNTHETIC_NEW"
+		self.save(state=referrals.ReferralState(replacement, True), stamp="2026-10-26T22:00:00Z")
+		value = referrals.get_referral_info("one", directory=self.home)
+		self.assertEqual(value, {"link": replacement, "link_found": True, "referrals": None, "friends": None, "read_at": "2026-10-26T22:00:00Z", "unreadable": None})
+		stored = json.loads((self.home / "referral.json").read_text())["accounts"]["one"]
+		self.assertEqual(stored["link_read_at"], stored["last_attempt_at"])
+
+	def test_020_030_shapes_load_and_upgrade_without_losing_good_link(self):
+		for error in (None, "page_unknown"):
+			old = {"link": LINK if error is None else None, "link_found": error is None, "referrals": None, "friends": None, "read_at": "2026-10-25T22:00:00Z", "unreadable": error, "run_id": RUN}
+			(self.home / "referral.json").write_text(json.dumps({"v": 1, "accounts": {"one": old}}), encoding="utf-8")
+			before = (self.home / "referral.json").read_bytes()
+			value = referrals.get_referral_info("one", directory=self.home)
+			self.assertEqual(value["link"], old["link"])
+			self.assertEqual(value["read_at"], old["read_at"])
+			self.assertEqual(value["unreadable"], error)
+			self.assertEqual((self.home / "referral.json").read_bytes(), before)
+			self.save(state=referrals.ReferralState(unreadable="page_unknown", reason="not_complete"))
+			upgraded = json.loads((self.home / "referral.json").read_text())["accounts"]["one"]
+			self.assertEqual(upgraded["link"], old["link"])
+			self.assertEqual(upgraded["link_read_at"], old["read_at"] if error is None else None)
+			self.assertEqual(upgraded["last_attempt_at"], AT)
+
+	def test_legacy_failed_snapshot_does_not_invent_a_verified_link(self):
+		old = {"link": LINK, "link_found": True, "read_at": AT, "unreadable": "storage_failed"}
+		(self.home / "referral.json").write_text(json.dumps({"v": 1, "accounts": {"one": old}}))
+		self.assertIsNone(referrals.get_referral_info("one", directory=self.home)["link"])
+
+	def test_first_failure_and_later_event_never_read_another_accounts_link(self):
+		self.save("two")
+		self.save(state=referrals.ReferralState(unreadable="page_unknown", reason="no_main"))
+		self.event(link_found=False, unreadable="page_unknown", referrals=None, friends=None)
+		value = referrals.get_referral_info("one", directory=self.home)
+		self.assertIsNone(value["link"])
+		self.assertFalse(value["link_found"])
+		self.assertEqual(value["read_at"], AT)
+		self.assertEqual(value["unreadable"], "page_unknown")
+
 	def test_atomic_failure_preserves_old_snapshot_and_removes_temp(self):
 		self.save()
 		path = self.home / "referral.json"
@@ -190,20 +387,23 @@ class ReferralStoreTests(unittest.TestCase):
 		self.assertEqual(path.read_bytes(), before)
 		self.assertEqual(list(self.home.iterdir()), [path])
 
-	def test_latest_failure_event_hides_old_link_after_storage_failure(self):
+	def test_latest_failure_event_preserves_old_link_after_storage_failure(self):
 		self.save(stamp="2026-10-25T22:00:00Z")
 		self.event(link_found=True, referrals=None, friends=None, unreadable="storage_failed")
 		value = referrals.get_referral_info("one", directory=self.home)
-		self.assertIsNone(value["link"])
-		self.assertEqual(value["read_at"], AT)
+		self.assertEqual(value["link"], LINK)
+		self.assertTrue(value["link_found"])
+		self.assertEqual(value["read_at"], "2026-10-25T22:00:00Z")
 		self.assertEqual(value["unreadable"], "storage_failed")
 
-	def test_mismatching_record_never_joins_link_from_another_measurement(self):
+	def test_mismatching_record_keeps_independently_dated_link_without_claiming_freshness(self):
 		self.save(identity="20261025T220000Z-0000")
 		self.event(link_found=True, referrals=None, friends=None, unreadable=None)
 		value = referrals.get_referral_info("one", directory=self.home)
 		self.assertTrue(value["link_found"])
-		self.assertIsNone(value["link"])
+		self.assertEqual(value["link"], LINK)
+		self.assertEqual(value["read_at"], AT)
+		self.assertEqual(value["unreadable"], "storage_unreadable")
 		self.assertIsNone(value["referrals"])
 		self.assertIsNone(value["friends"])
 
@@ -300,3 +500,27 @@ class ReferralHookTests(unittest.TestCase):
 			self.assertEqual(events[-1]["result"], "ok")
 			self.assertEqual([item["unreadable"] for item in events if item["type"] == "referral_state"], ["read_failed" if failure == "reader" else "storage_failed"] * 2)
 			self.assertNotIn(LINK, json.dumps(events))
+
+	def test_failed_read_retains_last_good_links_and_emits_value_free_reason(self):
+		for account in ("one", "two"):
+			referrals.save_referral_state(account, referrals.ReferralState(LINK, True), read_at=AT, run_id=RUN, directory=self.home)
+		self.referral.return_value = referrals.ReferralState(unreadable="page_unknown", reason="no_copy_button")
+		self.assertEqual(main.main(True, main.RunPlan(read_state=True)), 0)
+		for record in (event for event in self.events() if event["type"] == "referral_state"):
+			self.assertFalse(record["link_found"])
+			self.assertEqual(record["unreadable"], "page_unknown")
+			self.assertEqual(record["reason"], "no_copy_button")
+			value = referrals.get_referral_info(record["account"], directory=self.home)
+			self.assertEqual(value["link"], LINK)
+			self.assertEqual(value["read_at"], AT)
+			self.assertEqual(value["unreadable"], "page_unknown")
+		self.assertNotIn(LINK, json.dumps(self.events()))
+
+	def test_every_branch_reason_survives_record_and_unknown_reason_is_never_exported(self):
+		for reason in ("location", "too_many_controls", "no_main", "not_complete", "no_copy_button", LINK, [LINK]):
+			self.referral.return_value = referrals.ReferralState(unreadable="page_unknown", reason=reason)
+			with patch.object(main.run_record, "emit") as emit:
+				main._record_referrals(self.driver, accounts.Account("one", "synthetic", "Default"))
+			fields = next(call.kwargs for call in emit.call_args_list if call.args == ("referral_state",))
+			self.assertEqual(fields["reason"], reason if isinstance(reason, str) and reason in referrals.REASON_CODES else None)
+			self.assertNotIn(LINK, json.dumps(fields))

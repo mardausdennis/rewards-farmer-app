@@ -59,7 +59,8 @@ class DiagnosticsTests(unittest.TestCase):
 			friend_name, friend_email = "Private Synthetic Invitee", "invitee@example.invalid"
 			(home / "app-prefs.json").write_text(json.dumps({"v": 1, "invited_friends": [{"id": "friend-local", "name": friend_name, "email": friend_email}]}), encoding="utf-8")
 			link = "https://rewards.bing.com/refer?code=SYNTHETIC_PRIVATE"
-			(home / "referral.json").write_text(json.dumps({"link": link}), encoding="utf-8")
+			(home / "referral.json").write_text(json.dumps({"v": 1, "accounts": {"account-1": {"link": link, "link_found": True,
+				"link_read_at": "2026-10-26T12:00:00Z", "last_attempt_at": "2026-10-28T08:54:41Z", "unreadable": "page_unknown"}}}), encoding="utf-8")
 			(home / "account-identities.json").write_text(json.dumps({"bindings": {"expected_name_hash": "private-binding-hash"}, "pending": {"observed_name": "Private Pending Name"}}), encoding="utf-8")
 			(home / "account-migration.json").write_text(json.dumps({"before": {".env": "private-backup"}}), encoding="utf-8")
 			(home / ".env").write_text("OPENROUTER_API_KEY=secret\nLOCAL_LLM_API_KEY=local\nREWARDS_WEBHOOK_URL=https://discord.com/token\nQUERY_SOURCE=trends\n", encoding="utf-8")

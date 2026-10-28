@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 import constants
@@ -19,6 +20,9 @@ TARGET = "https://rewards.bing.com/referandearn/"
 # F102 observed the page skeleton, not this relationship or the link value.
 SELECTORS_VERIFIED = False
 UNREADABLE_CODES = frozenset(("signed_out", "challenge", "page_unknown", "link_missing", "link_ambiguous", "link_invalid", "read_failed", "storage_failed", "storage_unreadable", "not_read"))
+REASON_CODES = frozenset(("location", "too_many_controls", "no_main", "not_complete", "no_copy_button", "copy_button_ambiguous", "input_ambiguous", "input_missing", "link_invalid", "invalid_snapshot", "read_failed"))
+READY_TIMEOUT = 15.0
+POLL_INTERVAL = 0.25
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,7 @@ class ReferralState:
 	referrals: int | None = None
 	friends: list | None = None
 	unreadable: str | None = None
+	reason: str | None = None
 
 
 def _allowed_page(value):
@@ -59,10 +64,10 @@ def _link(value):
 	return None
 
 
-_SNAPSHOT = r"""
+_PAGE_CHECK = r"""
 const norm = value => String(value || '').replace(/\s+/g,' ').trim().toLowerCase();
 const controls = document.querySelectorAll('h1,h2,h3,input[type="password"],button,a,[role="button"],iframe');
-if (controls.length > 400) return {error:'page_unknown'};
+if (controls.length > 400) return {error:'page_unknown',reason:'too_many_controls'};
 for (const n of controls) {
   const tag = n.tagName.toLowerCase();
   const label = norm(n.getAttribute('aria-label') || n.textContent);
@@ -72,20 +77,24 @@ for (const n of controls) {
   if (tag === 'iframe' && /captcha|challenge|arkoselabs|verify/i.test((n.getAttribute('src') || '')+' '+(n.getAttribute('title') || ''))) return {error:'challenge'};
 }
 const root = document.querySelector('#main') || document.querySelector('main') || document.querySelector('[role="main"]');
-if (!root || document.readyState !== 'complete') return {error:'page_unknown'};
+if (!root) return {error:'page_unknown',reason:'no_main'};
+if (document.readyState !== 'complete') return {error:'page_unknown',reason:'not_complete'};
 const buttons = [...root.querySelectorAll('button,[role="button"]')].filter(n => ['copy link','link kopieren'].includes(norm(n.getAttribute('aria-label') || n.textContent)));
-if (buttons.length !== 1) return {error:buttons.length ? 'link_ambiguous' : 'page_unknown'};
+if (buttons.length !== 1) return {error:buttons.length ? 'link_ambiguous' : 'page_unknown',reason:buttons.length ? 'copy_button_ambiguous' : 'no_copy_button'};
+"""
+_READY = _PAGE_CHECK + "return {ready:true};"
+_SNAPSHOT = _PAGE_CHECK + r"""
 const [copy] = buttons;
 let parent = copy.parentElement;
 for (let depth=0; parent && depth<6 && root.contains(parent); depth++, parent=parent.parentElement) {
   const inputs = parent.querySelectorAll('input[type="text"],input[type="url"],input:not([type])');
-  if (inputs.length > 1) return {error:'link_ambiguous'};
+  if (inputs.length > 1) return {error:'link_ambiguous',reason:'input_ambiguous'};
   if (inputs.length === 1) {
     for (const input of inputs) return {link:String(input.value || '').trim()};
   }
   if (parent === root) break;
 }
-return {error:'link_missing'};
+return {error:'link_missing',reason:'input_missing'};
 """
 
 
@@ -109,28 +118,90 @@ def read_referral_page(driver) -> ReferralState:
 		return _read_page(driver)
 
 
+@contextmanager
+def _command_timeout(driver, seconds):
+	# Bound HTTP commands as well as the readiness loop. Disable retries so a
+	# transport timeout cannot multiply the budget; restore the caller's setup.
+	connection = getattr(driver, "command_executor", None)
+	config = getattr(connection, "_client_config", None)
+	if config is None:
+		yield
+		return
+	from urllib3.util import Timeout
+	previous = config.timeout
+	pool = getattr(connection, "_conn", None)
+	request = getattr(pool, "request", None)
+	def bounded_request(*args, **kwargs):
+		kwargs["retries"] = False
+		return request(*args, **kwargs)
+	try:
+		config.timeout = Timeout(total=seconds, connect=min(2, seconds), read=seconds)
+		if callable(request): pool.request = bounded_request
+		yield
+	finally:
+		config.timeout = previous
+		if callable(request): pool.request = request
+
+
+def _page_failure(raw):
+	if not isinstance(raw, dict):
+		return ReferralState(unreadable="page_unknown", reason="invalid_snapshot")
+	code, reason = raw.get("error"), raw.get("reason")
+	return ReferralState(unreadable=code if isinstance(code, str) and code in UNREADABLE_CODES else "page_unknown",
+		reason=reason if isinstance(reason, str) and reason in REASON_CODES else None)
+
+
+def _wait_ready(driver):
+	deadline = time.monotonic() + READY_TIMEOUT
+	failure = ReferralState(unreadable="page_unknown", reason="not_complete")
+	# At most 61 probes including the initial one; no unbounded fake-clock loop.
+	for attempt in range(int(READY_TIMEOUT / POLL_INTERVAL) + 1):
+		remaining = deadline - time.monotonic()
+		if remaining <= 0:
+			return failure
+		with _command_timeout(driver, min(2, remaining)):
+			raw = driver.execute_script(_READY)
+		if isinstance(raw, dict) and raw.get("ready") is True and not raw.get("error"):
+			return None if time.monotonic() <= deadline else failure
+		failure = _page_failure(raw)
+		if failure.unreadable in ("signed_out", "challenge") or failure.reason in ("too_many_controls", "invalid_snapshot"):
+			return failure
+		remaining = deadline - time.monotonic()
+		if remaining <= 0:
+			return failure
+		time.sleep(min(POLL_INTERVAL, remaining))
+	return failure
+
+
 def _read_page(driver):
 	try:
-		driver.get(TARGET)
-		location = driver.current_url
+		with _command_timeout(driver, 65):
+			driver.get(TARGET)
+		with _command_timeout(driver, 2):
+			location = driver.current_url
 		if not _allowed_page(location):
-			return ReferralState(unreadable=_location_error(location))
-		raw = driver.execute_script(_SNAPSHOT)
-		location = driver.current_url
+			return ReferralState(unreadable=_location_error(location), reason="location")
+		failure = _wait_ready(driver)
+		if failure is not None:
+			return failure
+		with _command_timeout(driver, 8):
+			raw = driver.execute_script(_SNAPSHOT)
+		with _command_timeout(driver, 2):
+			location = driver.current_url
 		if not _allowed_page(location):
-			return ReferralState(unreadable=_location_error(location))
+			return ReferralState(unreadable=_location_error(location), reason="location")
 		if not isinstance(raw, dict):
-			return ReferralState(unreadable="page_unknown")
+			return _page_failure(raw)
 		if raw.get("error"):
-			return ReferralState(unreadable=raw["error"] if raw["error"] in UNREADABLE_CODES else "page_unknown")
+			return _page_failure(raw)
 		value = raw.get("link")
 		link = _link(value)
 		if link is None:
-			return ReferralState(unreadable="link_missing" if not value else "link_invalid")
+			return ReferralState(unreadable="link_missing" if not value else "link_invalid", reason="input_missing" if not value else "link_invalid")
 		return ReferralState(link=link, link_found=True)
 	except Exception:
 		# WebDriver messages can contain the full private URL or returned markup.
-		return ReferralState(unreadable="read_failed")
+		return ReferralState(unreadable="read_failed", reason="read_failed")
 
 
 def _home(directory=None):
@@ -149,7 +220,14 @@ def _stored(directory):
 
 def save_referral_state(account, state, *, read_at, run_id, directory=None):
 	value = _stored(directory)
-	value["accounts"][account] = {"link": _link(state.link), "link_found": state.link_found is True, "referrals": state.referrals, "friends": state.friends, "read_at": read_at, "unreadable": state.unreadable, "run_id": run_id}
+	previous = _snapshot(value["accounts"].get(account))
+	if _time(read_at) is None:
+		raise ValueError("storage_unreadable")
+	link = _link(state.link) if state.link_found is True and state.unreadable is None else None
+	unreadable = _unreadable(state.unreadable) if state.unreadable is not None else None if link else "link_invalid" if state.link else "link_missing"
+	value["accounts"][account] = {"link": link or previous.get("link"), "link_found": bool(link or previous.get("link")),
+		"link_read_at": read_at if link else previous.get("link_read_at"), "last_attempt_at": read_at,
+		"referrals": state.referrals, "friends": state.friends, "unreadable": unreadable, "run_id": run_id}
 	path = _home(directory) / "referral.json"
 	path.parent.mkdir(parents=True, exist_ok=True)
 	name = None
@@ -174,16 +252,32 @@ def _time(value):
 		return None
 
 
+def _unreadable(value):
+	return value if isinstance(value, str) and value in UNREADABLE_CODES else "storage_unreadable" if value is not None else None
+
+
+def _snapshot(value):
+	if value is None:
+		return {}
+	if not isinstance(value, dict) or _time(value.get("last_attempt_at", value.get("read_at"))) is None:
+		raise ValueError("storage_unreadable")
+	stamp = value.get("last_attempt_at", value.get("read_at"))
+	link = _link(value.get("link")) if value.get("link_found") is True else None
+	# Older snapshots only verified their link when that single read succeeded.
+	link_at = value.get("link_read_at") if "link_read_at" in value else value.get("read_at") if value.get("unreadable") is None else None
+	if _time(link_at) is None or _time(link_at) > _time(stamp):
+		link, link_at = None, None
+	return {**value, "link": link, "link_read_at": link_at if link else None, "last_attempt_at": stamp}
+
+
 def get_referral_info(account, *, directory=None):
 	result = {"link": None, "link_found": False, "referrals": None, "friends": None, "read_at": None, "unreadable": "not_read"}
 	if account is None:
 		return result
 	try:
-		stored = _stored(directory)["accounts"].get(account)
-		if stored is not None and (not isinstance(stored, dict) or _time(stored.get("read_at")) is None):
-			raise ValueError("storage_unreadable")
+		stored = _snapshot(_stored(directory)["accounts"].get(account))
 	except (OSError, ValueError):
-		stored = None
+		stored = {}
 		result["unreadable"] = "storage_unreadable"
 	latest = None
 	for identity in run_record.list_run_ids(str(_home(directory) / "runs")):
@@ -195,17 +289,19 @@ def get_referral_info(account, *, directory=None):
 				latest = stamp, event
 	data = stored
 	matched = True
-	if latest is not None and (stored is None or latest[0] >= _time(stored["read_at"])):
+	if latest is not None and (not stored or latest[0] >= _time(stored["last_attempt_at"])):
 		event = latest[1]
-		matched = stored is not None and stored.get("run_id") == event.get("run") and _time(stored["read_at"]) == latest[0]
-		data = {**event, "read_at": event.get("read_at") or event.get("ts")}
-	if data is None:
+		matched = bool(stored) and stored.get("run_id") == event.get("run") and _time(stored["last_attempt_at"]) == latest[0]
+		data = {**event, "last_attempt_at": event.get("read_at") or event.get("ts")}
+	if not data:
 		return result
-	result.update(link_found=data.get("link_found") is True, referrals=data.get("referrals") if type(data.get("referrals")) is int and data["referrals"] >= 0 else None,
-		read_at=data.get("read_at"), unreadable=data.get("unreadable") if isinstance(data.get("unreadable"), str) and data["unreadable"] in UNREADABLE_CODES else "storage_unreadable" if data.get("unreadable") is not None else None)
-	if matched and stored is not None and result["unreadable"] is None:
-		result["link"] = _link(stored.get("link")) if result["link_found"] else None
+	# The link is an independently dated good observation, not a field of the
+	# latest event. A later failed attempt must not invalidate that observation.
+	result.update(link=stored.get("link"), link_found=bool(stored.get("link")),
+		referrals=data.get("referrals") if type(data.get("referrals")) is int and data["referrals"] >= 0 else None,
+		read_at=stored.get("link_read_at") if stored.get("link") else data.get("last_attempt_at"), unreadable=_unreadable(data.get("unreadable")))
+	if matched and stored and result["unreadable"] is None:
 		result["friends"] = stored.get("friends") if isinstance(stored.get("friends"), list) else None
-	if result["link_found"] and result["link"] is None and result["unreadable"] is None:
+	if data.get("link_found") is True and (not matched or result["link"] is None) and result["unreadable"] is None:
 		result["unreadable"] = "storage_unreadable"
 	return result

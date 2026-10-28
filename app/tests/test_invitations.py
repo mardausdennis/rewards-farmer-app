@@ -110,6 +110,12 @@ class InvitationTests(unittest.TestCase):
 		self.assertTrue(self.api.get_referral_info({})["ok"])
 		backend.get_referral_info.assert_called_with(None, directory=self.home)
 
+	def test_referral_bridge_returns_last_good_link_and_latest_attempt_error(self):
+		referrals.save_referral_state("account-1", referrals.ReferralState("https://rewards.bing.com/refer?code=SYNTHETIC", True), read_at="2026-10-26T12:00:00Z", run_id="synthetic-good", directory=self.home)
+		referrals.save_referral_state("account-1", referrals.ReferralState(unreadable="page_unknown", reason="no_copy_button"), read_at="2026-10-28T08:54:41Z", run_id="synthetic-failed", directory=self.home)
+		answer = self.api.get_referral_info({})
+		self.assertEqual(answer, {"ok": True, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC", "link_found": True, "referrals": None, "friends": None, "read_at": "2026-10-26T12:00:00Z", "unreadable": "page_unknown"}})
+
 	def test_friends_are_not_real_accounts_and_cannot_start_run(self):
 		friend = self.save()["data"]["friend"]
 		self.api._dependencies["run_lock"] = SimpleNamespace(status=lambda **kwargs: None)

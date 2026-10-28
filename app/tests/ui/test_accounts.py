@@ -339,15 +339,44 @@ class AccountsTests(unittest.TestCase):
 		 const remount=async()=>{router.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));router.navigate('#/accounts');await wait(()=>document.querySelector('.accounts-referrals')&&!document.querySelector('.accounts-referrals .spinner'))};
 		 for(const code of referralUnreadableCodes){
 		  info={link:'https://rewards.bing.com/refer?code=SYNTHETIC',link_found:true,referrals:null,friends:null,read_at:'2026-10-25T22:00:00Z',unreadable:code};await remount();
-		  assert(!document.getElementById('accounts-referral-copy')&&!document.getElementById('accounts-referral-link'),'F104 unreadable never offers link '+code);
+		  const link=document.getElementById('accounts-referral-link'),copy=document.getElementById('accounts-referral-copy');
+		  assert(link&&link.value===info.link&&link.readOnly&&link.dir==='ltr'&&copy&&!copy.disabled,'F111 last verified link remains copyable '+code);
 		  assert(document.querySelector('[data-referral-unreadable]').textContent===i.t('accounts.referrals.unreadable.'+code),'F104 exact unreadable key '+code);
 		  assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F104 null not zero '+code);
+		  assert(document.querySelector('.accounts-referral-read time').dateTime===info.read_at,'F111 retained link keeps its own read time '+code);
 		 }
 		 info={link:null,link_found:false,referrals:0,friends:[],read_at:null,unreadable:null};await remount();
 		 assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.formatNumber(0)),'F104 observed zero is distinct from unknown');
 		 assert(!document.querySelector('.accounts-referral-read')&&!document.getElementById('accounts-referral-copy'),'F104 absent timestamp and link not invented');
+		 assert(!document.getElementById('accounts-referral-link')&&document.querySelector('.accounts-referral-unavailable').textContent===i.t('accounts.referrals.link_unknown'),'F111 null link keeps exact unavailable text');
 		 """)
 		self.assertEqual([],_harness.errors())
+
+	def test_f111_retained_referral_link_with_failed_attempt_capture(self):
+		_harness.viewport(860,600)
+		try:
+			self.open('invitations','light')
+			self.js("""
+			 const api=window.pywebview.api,original=api.get_referral_info,response=await original({account_id:'account-1'});
+			 assert(response.ok&&response.data.link==='https://rewards.bing.com/refer?code=SYNTHETIC'&&response.data.unreadable==='page_unknown','F111 synthetic retained-link producer fixture');
+			 api.get_referral_info=async()=>structuredClone(response);
+			 const router=await import('./js/router.js');router.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));router.navigate('#/accounts');
+			 await wait(()=>document.querySelector('[data-referral-unreadable=page_unknown]')&&document.getElementById('accounts-referral-link'));
+			 const section=document.querySelector('.accounts-referrals'),link=document.getElementById('accounts-referral-link');
+			 assert(link.value===response.data.link&&link.readOnly&&!document.getElementById('accounts-referral-copy').disabled,'F111 retained link field and Copy');
+			 assert(section.querySelector('[data-referral-unreadable]').textContent===i.t('accounts.referrals.unreadable.page_unknown'),'F111 exact latest failed-attempt status');
+			 assert([...section.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F111 failed attempt never invents figures');
+			 const time=section.querySelector('time');assert(time.dateTime===response.data.read_at&&time.textContent===i.t('accounts.referrals.read_at',{date:i.formatDate(response.data.read_at),time:i.formatTime(response.data.read_at)}),'F111 link own read time unchanged');
+			 section.scrollIntoView({block:'start'});document.activeElement?.blur();await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+			 assert(section.getBoundingClientRect().top>=0&&section.getBoundingClientRect().bottom<=innerHeight,'F111 complete referral section visible');
+			 """)
+			folder=os.environ.get('RF_F108_CAPTURE')
+			if folder:
+				path=Path(folder)/'f111';path.mkdir(parents=True,exist_ok=True)
+				self.assertTrue(_harness.driver.save_screenshot(str(path/'referral-retained-link-page-unknown-light-860x600.png')))
+			self.assertEqual([],_harness.errors())
+		finally:
+			_harness.viewport(1280,800)
 
 	def test_f104_friend_save_failure_and_remove_failure_retain_note(self):
 		self.open("invitations")

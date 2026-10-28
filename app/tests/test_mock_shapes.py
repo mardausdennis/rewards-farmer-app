@@ -492,7 +492,8 @@ class MockShapeTests(unittest.TestCase):
 			info = referrals.get_referral_info(None, directory=folder)
 			fixture = json.loads((MOCK_ROOT / "accounts/invitations.json").read_text(encoding="utf-8"))["methods"]
 			self.assertEqual(set(friend), set(fixture["save_invited_friend"]["data"]["friend"]))
-			self.assertEqual(set(info), set(fixture["get_referral_info"]["data"]))
+			for _, answer in successful_answers(fixture["get_referral_info"]):
+				self.assertEqual(set(info), set(answer["data"]))
 			for path in (MOCK_ROOT / "accounts").glob("invitations*.json"):
 				methods = json.loads(path.read_text(encoding="utf-8"))["methods"]
 				for name in ("get_invited_friends", "save_invited_friend", "remove_invited_friend"):
@@ -503,11 +504,21 @@ class MockShapeTests(unittest.TestCase):
 						self.assertEqual(set(item), set(friend))
 						self.assertRegex(item["id"], r"^friend-[0-9a-f]{32}$")
 				if "get_referral_info" in methods:
-					data = methods["get_referral_info"]["data"]
-					self.assertEqual(set(data), set(info))
-					self.assertIsNone(data["referrals"])
-					self.assertIsNone(data["friends"])
-					self.assertIs(type(data["link_found"]), bool)
+					for _, answer in successful_answers(methods["get_referral_info"]):
+						data = answer["data"]
+						self.assertEqual(set(data), set(info))
+						self.assertIsNone(data["referrals"])
+						self.assertIsNone(data["friends"])
+						self.assertIs(type(data["link_found"]), bool)
+
+	def test_f111_retained_link_fixture_matches_backend_after_failed_attempt(self):
+		import referrals
+		responses = json.loads((MOCK_ROOT / "accounts/invitations.json").read_text(encoding="utf-8"))["methods"]["get_referral_info"]
+		retained = next(answer for answer in responses if answer.get("when") == {"account_id": "account-1"})["data"]
+		with tempfile.TemporaryDirectory() as directory:
+			referrals.save_referral_state("account-1", referrals.ReferralState(retained["link"], True), read_at=retained["read_at"], run_id="synthetic-good", directory=directory)
+			referrals.save_referral_state("account-1", referrals.ReferralState(unreadable="page_unknown", reason="no_copy_button"), read_at="2026-10-28T08:54:41Z", run_id="synthetic-failed", directory=directory)
+			self.assertEqual(referrals.get_referral_info("account-1", directory=directory), retained)
 
 	def test_f78_overview_streaks_shapes(self):
 		checked = 0
