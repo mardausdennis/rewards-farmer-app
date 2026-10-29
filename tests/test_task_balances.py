@@ -435,7 +435,7 @@ class TaskEntryProofTests(unittest.TestCase):
 		for task_id, _, method in rewards_tasks.TASKS:
 			with self.subTest(task=task_id):
 				tasks = rewards_tasks.RewardsTaskUtils.__new__(rewards_tasks.RewardsTaskUtils)
-				tasks.elements = types.SimpleNamespace(get_points_breakdown_button=object())
+				tasks.elements = types.SimpleNamespace(get_points_breakdown_button=object(), get_all_misc_cards=object())
 				tasks.switch_to_earn_page = mock.Mock(side_effect=ReachedOwnSection)
 				tasks.switch_to_dashboard = mock.Mock(side_effect=ReachedOwnSection)
 				with self.assertRaises(ReachedOwnSection):

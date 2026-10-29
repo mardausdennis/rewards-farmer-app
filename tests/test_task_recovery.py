@@ -25,6 +25,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 
 import rewards_tasks
+from element_selectors import ElementSelectionUtils
+from fakes import FakeDriver, FakeElement
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait as RealWait
 
 HOME = rewards_tasks.REWARDS_HOME_URL
 BING_RESULTS = "https://www.bing.com/search?q=weather"
@@ -351,6 +355,55 @@ class UnhydratedPageRecoveryTests(unittest.TestCase):
 		self.assertEqual(self.tasks.wait_for_then_click.call_count, 2)
 		self.assertEqual(self.tasks.driver.visited, ["https://rewards.bing.com/dashboard"])
 		self.assertIsNone(self.tasks.progress)
+
+
+class MiscCardsHydrationRecovery(unittest.TestCase):
+	def tasks(self, ready=False, recover=True):
+		container = FakeElement()
+		card = FakeElement()
+		class Driver(FakeDriver):
+			current_window_handle = MAIN_TAB
+			def __init__(self):
+				super().__init__(children={(By.ID, "moreactivities"): [container]})
+				self.visited = []
+			def get(self, url):
+				self.visited.append(url)
+				if recover:
+					container.children[(By.TAG_NAME, "a")] = [card]
+		if ready:
+			container.children[(By.TAG_NAME, "a")] = [card]
+		tasks = rewards_tasks.RewardsTaskUtils.__new__(rewards_tasks.RewardsTaskUtils)
+		tasks.driver = Driver()
+		tasks.elements = ElementSelectionUtils(tasks.driver)
+		tasks.elements.card_is_complete = lambda card: True
+		tasks.switch_to_earn_page = mock.Mock()
+		tasks.tab_utils = RecordingTabUtils()
+		tasks.mouse = types.SimpleNamespace(wheel_scroll_element_into_view=lambda card: None, wheel_scroll_to_top=lambda: None)
+		tasks.move_to_and_click = mock.Mock()
+		return tasks
+
+	def test_initial_empty_section_reloads_once_before_any_activity(self):
+		tasks = self.tasks()
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertLogs(rewards_tasks.logger, level="WARNING"):
+			tasks.complete_misc_cards()
+		self.assertEqual(tasks.driver.visited, ["https://rewards.bing.com/earn"])
+		tasks.switch_to_earn_page.assert_called_once_with()
+		tasks.move_to_and_click.assert_not_called()
+		self.assertEqual(tasks.progress, "opened 0 cards")
+
+	def test_ready_section_does_not_reload(self):
+		tasks = self.tasks(ready=True)
+		tasks.complete_misc_cards()
+		self.assertEqual(tasks.driver.visited, [])
+		tasks.move_to_and_click.assert_not_called()
+
+	def test_failed_recovery_propagates_original_class_with_getter_without_clicks(self):
+		tasks = self.tasks(recover=False)
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertLogs(rewards_tasks.logger, level="WARNING"), self.assertRaises(TimeoutException) as caught:
+			tasks.complete_misc_cards()
+		self.assertEqual(caught.exception.element_getter, "get_all_misc_cards")
+		self.assertEqual(tasks.driver.visited, ["https://rewards.bing.com/earn"])
+		tasks.move_to_and_click.assert_not_called()
 
 
 if __name__ == "__main__":

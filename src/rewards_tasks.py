@@ -189,6 +189,16 @@ def task_failure_report(exc: BaseException, progress: str | None = None) -> tupl
 	return classify_task_failure(exc, progress)[:2]
 
 
+_ELEMENT_GETTERS = frozenset(name for name, value in vars(element_selectors.ElementSelectionUtils).items()
+	if name.startswith("get_") and callable(value))
+_WAIT_WRAPPERS = {"link_or_done": "get_search_now_link_from_visual_search_sidebar", "full_activity_list": "get_daily_set_elements"}
+
+
+def _element_getter_code(getter):
+	name = getattr(getter, "__name__", None)
+	return name if name in _ELEMENT_GETTERS else _WAIT_WRAPPERS.get(name, "unknown_getter")
+
+
 class RewardsTaskUtils:
 	def __init__(self, driver: webdriver.Edge):
 		self.driver = driver
@@ -306,7 +316,10 @@ class RewardsTaskUtils:
 
 		try:
 			return WebDriverWait(self.driver, timeout).until(condition)
-		except TimeoutException:
+		except TimeoutException as exc:
+			code = _element_getter_code(element_getter)
+			# Recovery may swallow this timeout; keep its getter in the run too.
+			run_record.emit("element_wait", getter=code)
 			# A falsy return means the getter found something and rejected it,
 			# and ElementNotReady means it was there but still rendering. Only
 			# a plain NoSuchElementException every time means it was never
@@ -317,11 +330,14 @@ class RewardsTaskUtils:
 			)
 
 			if not never_there:
+				exc.element_getter = code
 				raise
 
-			raise ElementNeverAppeared(
+			error = ElementNeverAppeared(
 				f"nothing matched during the {timeout}s wait: {log_utils.exception_summary(last_error)}"
-			) from last_error
+			)
+			error.element_getter = code
+			raise error from last_error
 
 	def switch_to_earn_page(self):
 		self.move_to_and_click(self.elements.get_earn_tab())
@@ -529,10 +545,9 @@ class RewardsTaskUtils:
 		self.tab_utils.close_all_other_tabs()
 
 	def complete_misc_cards(self):
-		self.switch_to_earn_page()
+		# Recover only the initial read. Retrying the task could click a card twice.
+		misc_cards: list[WebElement] = self.reach_earn_page(self.elements.get_all_misc_cards, timeout=10)
 		main_tab = self.driver.current_window_handle
-
-		misc_cards: list[WebElement] = self.wait_for_element(self.elements.get_all_misc_cards)
 
 		opened = 0
 		self.progress = "opened 0 cards"
@@ -1014,6 +1029,7 @@ class RewardsTaskUtils:
 			began = clock()
 			run_record.emit("task_start", task=task_id, name=name, points_before=before)
 			outcome, reason, reason_key = "ok", None, None
+			element_wait = None
 			# The tags stay in the message rather than being folded into the
 			# level, they are the per-task outcome summary and reading a run
 			# means scanning for them.
@@ -1030,6 +1046,10 @@ class RewardsTaskUtils:
 			except Exception as exc:
 				tag, reason, reason_key = classify_task_failure(exc, self.progress)
 				outcome = "skip" if tag == "SKIP" else "fail"
+				if isinstance(exc, (ElementNeverAppeared, element_selectors.ElementNotReady, TimeoutException)):
+					code = getattr(exc, "element_getter", None)
+					# Source-owned names only; exception messages can contain page values.
+					element_wait = {"getter": code if isinstance(code, str) and code in _ELEMENT_GETTERS else "unknown_getter"}
 
 				logger.log(
 					logging.WARNING if tag == "SKIP" else logging.ERROR,
@@ -1048,7 +1068,7 @@ class RewardsTaskUtils:
 			diagnostic = {phase: value for phase, value in (("before", before_diagnostic), ("after", after_diagnostic)) if value is not None}
 			run_record.emit("task_end", task=task_id, name=name, outcome=outcome, reason_key=reason_key, detail=reason,
 				progress=self.progress, points_before=before, points_after=after, duration_ms=round((clock() - began) * 1000),
-				**({"balance_read": diagnostic} if diagnostic else {}))
+				**({"balance_read": diagnostic} if diagnostic else {}), **({"element_wait": element_wait} if element_wait else {}))
 			# Only logs and record writes separate these boundaries, including
 			# when a turned-off task lies between them. None is shared too.
 			before, before_diagnostic, have_before = after, after_diagnostic, True

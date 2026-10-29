@@ -62,6 +62,9 @@ class ElementNotReady(NoSuchElementException):
 	Subclassed rather than separate, so every existing `except
 	NoSuchElementException` keeps catching it.
 	"""
+	def __init__(self, message, *, element_getter=None):
+		super().__init__(message)
+		self.element_getter = element_getter
 
 
 class Labels:
@@ -159,7 +162,9 @@ class ElementSelectionUtils:
 				continue
 
 		raise ElementNotReady(
-			f"{element_id!r} is present but no visible copy has content yet"
+			f"{element_id!r} is present but no visible copy has content yet",
+			element_getter={"moreactivities": "get_all_misc_cards", "exploreonbing": "get_explore_on_bing_elements",
+				"quests": "get_quest_links"}.get(element_id),
 		)
 
 	def _button_containing(self, needle: str, root: WebElement = None) -> WebElement:

@@ -11,10 +11,12 @@ None of them need a browser.
 """
 
 import logging
+import json
 import os
 import sys
 import types
 import unittest
+import tempfile
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -28,7 +30,10 @@ from selenium.common.exceptions import (
 
 import rewards_tasks
 from element_selectors import ElementNotReady
-from fakes import FakeDriver
+from fakes import FakeDriver, FakeElement
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait as RealWait
+from element_selectors import ElementSelectionUtils
 from rewards_tasks import ElementNeverAppeared, task_failure_report
 
 # Long enough for one poll, short enough that the suite stays quick.
@@ -99,6 +104,36 @@ class WaitClassification(unittest.TestCase):
 			make_tasks().wait_for_element(missing, timeout=BRIEF)
 
 		self.assertIn("points breakdown", str(caught.exception))
+
+	def test_expired_getters_have_source_owned_value_free_codes(self):
+		for getter_name, driver, failure in (
+			("get_visual_search_file_input", FakeDriver(), ElementNeverAppeared),
+			("get_all_misc_cards", FakeDriver(children={(By.ID, "moreactivities"): [FakeElement()]}), TimeoutException),
+			("get_quest_activity_links", FakeDriver(), TimeoutException),
+		):
+			with self.subTest(getter=getter_name), mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)):
+				tasks = make_tasks()
+				tasks.driver = driver
+				getter = getattr(ElementSelectionUtils(driver), getter_name)
+				with mock.patch.object(rewards_tasks.run_record, "emit") as emit, self.assertRaises(failure) as caught:
+					tasks.wait_for_element(getter)
+				self.assertEqual(caught.exception.element_getter, getter_name)
+				emit.assert_called_once_with("element_wait", getter=getter_name)
+
+	def test_daily_set_wrapper_uses_the_underlying_getter_code(self):
+		def full_activity_list():
+			return []
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertRaises(TimeoutException) as caught:
+			make_tasks().wait_for_element(full_activity_list)
+		self.assertEqual(caught.exception.element_getter, "get_daily_set_elements")
+
+	def test_arbitrary_callable_names_cannot_enter_the_diagnostic(self):
+		def getter():
+			raise NoSuchElementException("https://synthetic.invalid/referral?token=PRIVATE")
+		getter.__name__ = "https://synthetic.invalid/PRIVATE"
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertRaises(ElementNeverAppeared) as caught:
+			make_tasks().wait_for_element(getter)
+		self.assertEqual(caught.exception.element_getter, "unknown_getter")
 
 
 class ExistingTimeoutHandlers(unittest.TestCase):
@@ -774,6 +809,54 @@ if __name__ == "__main__":
 
 
 class RecordedTaskOutcomes(unittest.TestCase):
+	def test_visual_link_wait_is_persisted_without_page_values_and_does_not_leak_to_next_task(self):
+		import run_record
+		opener = FakeElement(text="Visual search streak")
+		panel = FakeElement(attributes={"id": "react-aria-synthetic"})
+		driver = FakeDriver(children={(By.TAG_NAME, "button"): [opener], (By.TAG_NAME, "section"): [panel]})
+		tasks = make_tasks()
+		tasks.driver, tasks.elements = driver, ElementSelectionUtils(driver)
+		tasks.switch_to_earn_page = lambda: None
+		tasks.move_to_and_click = lambda target: target() if callable(target) else target
+		tasks.restore_main_tab = lambda: None
+		tasks.return_to_rewards_home = lambda: None
+		tasks.balance_reader = lambda: 10
+		tasks.complete_misc_cards = lambda: None
+		with tempfile.TemporaryDirectory() as folder:
+			recorder = run_record.open_run("app", ["synthetic"], {}, [], run_id="20261029T100000Z-0115", directory=folder)
+			try:
+				with mock.patch.dict(os.environ, {rewards_tasks.SKIP_TASKS_ENV: ""}), mock.patch.object(rewards_tasks, "VISUAL_SEARCH_IMAGE_PATH", __file__), mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), run_record.account_context("synthetic"), self.assertLogs(rewards_tasks.logger, level="INFO"):
+					tasks.complete_all_tasks(only={"visual_search", "misc_cards"})
+			finally:
+				run_record.close_run("partial", 0)
+			with open(recorder.path, encoding="utf-8") as stream:
+				ends = [event for line in stream if (event := json.loads(line)).get("type") == "task_end"]
+		self.assertEqual(ends[0]["element_wait"], {"getter": "get_search_now_link_from_visual_search_sidebar"})
+		self.assertEqual((ends[0]["outcome"], ends[0]["reason_key"], ends[0]["progress"]), ("fail", "element_missing", "opened the sidebar"))
+		self.assertEqual(ends[1]["outcome"], "ok")
+		self.assertNotIn("element_wait", ends[1])
+
+	def test_not_ready_task_records_safe_getter_and_preserves_reason_key(self):
+		loop = TaskLoop()
+		loop.ran = []
+		error = ElementNotReady("https://synthetic.invalid/referral?token=PRIVATE", element_getter="get_all_misc_cards")
+		tasks = loop._tasks(failures={"complete_misc_cards": error})
+		with mock.patch.object(rewards_tasks.run_record, "emit") as emit, self.assertLogs(rewards_tasks.logger, level="INFO"):
+			tasks.complete_all_tasks()
+		end = next(call.kwargs for call in emit.call_args_list if call.args == ("task_end",) and call.kwargs["task"] == "misc_cards")
+		self.assertEqual(end["element_wait"], {"getter": "get_all_misc_cards"})
+		self.assertEqual(end["reason_key"], "not_ready")
+		self.assertNotIn("PRIVATE", json.dumps(end))
+		for error in (TimeoutException("PRIVATE"), ElementNeverAppeared("PRIVATE")):
+			with self.subTest(error=type(error).__name__):
+				error.element_getter = "PRIVATE://not-a-source-getter"
+				tasks = loop._tasks(failures={"complete_misc_cards": error})
+				with mock.patch.object(rewards_tasks.run_record, "emit") as emit, self.assertLogs(rewards_tasks.logger, level="INFO"):
+					tasks.complete_all_tasks()
+				end = next(call.kwargs for call in emit.call_args_list if call.args == ("task_end",) and call.kwargs["task"] == "misc_cards")
+				self.assertEqual(end["element_wait"], {"getter": "unknown_getter"})
+				self.assertNotIn("PRIVATE", json.dumps(end))
+
 	def test_short_search_quota_is_not_a_selenium_error_and_preserves_measurement(self):
 		error = rewards_tasks.SearchQuotaShort(27, 60)
 		self.assertNotIsInstance(error, WebDriverException)
