@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "Esta operação de convite não é válida. Abra uma nova prévia em Contas.", "src": "b2620b09"},
+    "errors.app.accounts_invite_busy": {"text": "Primeiro conclua, retome ou descarte a configuração por convite pendente.", "src": "c63995e5"},
+    "errors.app.accounts_invite_stale": {"text": "A origem ou o convite mudou. Confira uma nova prévia antes de abrir.", "src": "44f0cd85"},
+    "errors.app.accounts_invite_link_unavailable": {"text": "Esta conta não tem um link de convite seguro salvo. Escolha outra origem ou use a entrada normal.", "src": "e3d7c6fe"},
+    "errors.app.accounts_invite_root": {"text": "Use Adicionar conta para concluir primeiro a mudança do perfil antigo. A configuração por convite não pode movê-lo.", "src": "7d1a2664"},
+    "errors.app.accounts_invite_expired": {"text": "Esta prévia expirou. Confira novamente antes de abrir o convite.", "src": "52b0c216"},
+    "errors.app.accounts_invite_token": {"text": "Esta ação está desatualizada ou já foi usada. Confira a configuração por convite atual.", "src": "6f74aa88"},
+    "errors.app.accounts_invite_interrupted": {"text": "A janela do convite não está mais disponível. Retome por uma nova prévia.", "src": "803f7c04"},
+    "errors.app.accounts_invite_ineligible": {"text": "Confirme as contas existentes antes de usar um convite para uma nova conta.", "src": "103e2ab9"},
+    "errors.app.accounts_invite_unknown": {"text": "A configuração por convite não pôde terminar. O novo perfil foi mantido para recuperação.", "src": "3c798d8a"},
+    "errors.app.accounts_invite_storage": {"text": "Não foi possível salvar ou descartar a configuração por convite com segurança. Os dados foram mantidos.", "src": "2ec842de"},
+    "errors.app.accounts_invite_registered": {"text": "Esta conta já está conectada. A configuração por convite não pode descartá-la.", "src": "4771edcf"},
     "errors.app.accounts_enrollment_required": {"text": "Confirme as contas existentes antes de adicionar outra.", "src": "38a2a24f"},
     "errors.app.accounts_enrollment_pending": {"text": "Primeiro confirme ou cancele a conta que está aguardando confirmação.", "src": "38877ef1"},
     "errors.app.accounts_enrollment_expired": {"text": "Esta confirmação expirou. Entre novamente para confirmar a conta.", "src": "c4a47edc"},

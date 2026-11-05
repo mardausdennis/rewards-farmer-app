@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "Dieser Einladungsvorgang ist ungültig. Öffne unter Konten eine neue Vorschau.", "src": "b2620b09"},
+    "errors.app.accounts_invite_busy": {"text": "Schließe die offene Einladungseinrichtung ab, setze sie fort oder verwirf sie zuerst.", "src": "c63995e5"},
+    "errors.app.accounts_invite_stale": {"text": "Quelle oder Einladung hat sich geändert. Prüfe vor dem Öffnen eine neue Vorschau.", "src": "44f0cd85"},
+    "errors.app.accounts_invite_link_unavailable": {"text": "Für dieses Konto ist kein sicherer Einladungslink gespeichert. Wähle eine andere Quelle oder die normale Anmeldung.", "src": "e3d7c6fe"},
+    "errors.app.accounts_invite_root": {"text": "Schließe zuerst über Konto hinzufügen den Umzug des älteren Profils ab. Die Einladungseinrichtung kann dieses Profil nicht verschieben.", "src": "7d1a2664"},
+    "errors.app.accounts_invite_expired": {"text": "Diese Vorschau ist abgelaufen. Sieh sie vor dem Öffnen der Einladung erneut an.", "src": "52b0c216"},
+    "errors.app.accounts_invite_token": {"text": "Diese Aktion ist veraltet oder wurde bereits ausgeführt. Prüfe die aktuelle Einladungseinrichtung.", "src": "6f74aa88"},
+    "errors.app.accounts_invite_interrupted": {"text": "Das Einladungsfenster ist nicht mehr verfügbar. Setze die Einrichtung über eine neue Vorschau fort.", "src": "803f7c04"},
+    "errors.app.accounts_invite_ineligible": {"text": "Bestätige die bestehenden Konten, bevor du eine Einladung für ein neues Konto verwendest.", "src": "103e2ab9"},
+    "errors.app.accounts_invite_unknown": {"text": "Die Einladungseinrichtung konnte nicht abgeschlossen werden. Das neue Profil blieb zur Wiederaufnahme erhalten.", "src": "3c798d8a"},
+    "errors.app.accounts_invite_storage": {"text": "Die Einladungseinrichtung konnte nicht sicher gespeichert oder verworfen werden. Ihre Daten blieben erhalten.", "src": "2ec842de"},
+    "errors.app.accounts_invite_registered": {"text": "Dieses Konto ist bereits verbunden. Die Einladungseinrichtung kann es nicht verwerfen.", "src": "4771edcf"},
     "errors.app.accounts_enrollment_required": {"text": "Bestätige die vorhandenen Konten, bevor du ein weiteres hinzufügst.", "src": "38a2a24f"},
     "errors.app.accounts_enrollment_pending": {"text": "Bestätige zuerst das wartende Konto oder brich die Bestätigung ab.", "src": "38877ef1"},
     "errors.app.accounts_enrollment_expired": {"text": "Diese Bestätigung ist abgelaufen. Melde dich erneut an, um das Konto zu bestätigen.", "src": "c4a47edc"},

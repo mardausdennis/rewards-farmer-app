@@ -48,6 +48,11 @@ SUCCESS_KEYS = {
 	"confirm_enrollment": {"account_id", "identity_status", "confirmed_at", "managed", "same_name_limit"},
 	"get_account_picture": {"account_id", "rev", "data_url"},
 	"add_account": {"account_id", "signin"},
+	"preview_invite_account": {"invitation"},
+	"start_invite_account": {"account_id", "signin"},
+	"list_invite_operations": {"operations"},
+	"continue_invite_account": {"invitation"},
+	"discard_invite_account": {"invitation"},
 	"sign_in_again": {"signin"},
 	"cancel_signin": set(),
 	"rename_account": {"account"},
@@ -374,7 +379,7 @@ def validate_account_and_signin_records(mock_root):
 			fixture = json.loads(path.read_text(encoding="utf-8"))
 			for kind, location, record in named_records(fixture, path.relative_to(mock_root).as_posix()):
 				if kind == "signin":
-					produced = signin._write_status(record["account_id"], record["state"], record["error_code"], record.get("detail"))
+					produced = signin._write_status(record["account_id"], record["state"], record["error_code"], record.get("detail"), invitation=record.get("invitation"))
 					if record["message_key"] != produced["message_key"]:
 						problems.append(f"{location}.message_key: {record['message_key']!r} differs from signin._write_status {produced['message_key']!r}")
 				else:

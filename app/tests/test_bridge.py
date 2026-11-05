@@ -49,7 +49,7 @@ class BridgeTests(unittest.TestCase):
 			"schedule": SimpleNamespace(status=Mock(return_value={"mode": "manual"}), ensure=Mock(return_value={}), replace_legacy_task=Mock(return_value={"mode": "manual"})),
 			"run_lock": SimpleNamespace(status=Mock(return_value=None)),
 			"run_record": SimpleNamespace(read_events=Mock(return_value=[]), append_event=Mock()),
-			"accounts_admin": SimpleNamespace(list_accounts=Mock(return_value={"accounts": [self.account]}), add_account=Mock(return_value={"account_id": "account-1", "signin": self.signin}), sign_in_again=Mock(return_value={"signin": self.signin}), get_signin_status=Mock(return_value=self.signin), cancel_signin=Mock(return_value={}), rename_account=Mock(return_value={"account": self.account}), set_account_paused=Mock(return_value={"account": self.account}), remove_account=Mock(return_value={"accounts": [], "warnings": []}), get_legacy_install=Mock(return_value={"found": False, "path": None, "accounts": []}), import_legacy_install=Mock(return_value={"accounts": [self.account]})),
+			"accounts_admin": SimpleNamespace(list_accounts=Mock(return_value={"accounts": [self.account]}), list_invite_operations=Mock(return_value={"operations": []}), add_account=Mock(return_value={"account_id": "account-1", "signin": self.signin}), sign_in_again=Mock(return_value={"signin": self.signin}), get_signin_status=Mock(return_value=self.signin), cancel_signin=Mock(return_value={}), rename_account=Mock(return_value={"account": self.account}), set_account_paused=Mock(return_value={"account": self.account}), remove_account=Mock(return_value={"accounts": [], "warnings": []}), get_legacy_install=Mock(return_value={"found": False, "path": None, "accounts": []}), import_legacy_install=Mock(return_value={"accounts": [self.account]})),
 			"updates": SimpleNamespace(check=Mock(return_value={"available": True, "latest": "0.2.0"})),
 			"diagnostics": SimpleNamespace(export=Mock()),
 		}
@@ -64,6 +64,7 @@ class BridgeTests(unittest.TestCase):
 
 	def test_exact_methods_one_object_and_no_public_state(self):
 		expected = {"ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_invited_friends", "save_invited_friend", "remove_invited_friend", "get_referral_info", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "begin_enrollment", "get_enrollment_status", "confirm_enrollment", "cancel_signin", "rename_account", "set_account_paused", "remove_account"}
+		expected.update({"preview_invite_account", "start_invite_account", "list_invite_operations", "continue_invite_account", "discard_invite_account"})
 		public = {name for name in dir(self.api) if not name.startswith("_")}
 		self.assertEqual(public, expected)
 		for name in public:

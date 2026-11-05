@@ -204,7 +204,7 @@ class Bridge:
 			try:
 				account_id = json.loads(read_file(status_file))["account_id"]
 				status = admin.get_signin_status(account_id)
-				if status["state"] in ("starting", "waiting", "verifying", "awaiting_confirmation"):
+				if status["state"] in ("starting", "waiting", "verifying", "invite_waiting", "awaiting_confirmation"):
 					return {"account_id": account_id}
 			except (OSError, ValueError, KeyError):
 				_log.warning("Unreadable sign-in status: %s", status_file.name)
@@ -593,6 +593,42 @@ class Bridge:
 		confirmed = _boolean(request.get("confirm_migration", False))
 		with self._settings_lock:
 			return self._module("accounts_admin").add_account(confirm_migration=confirmed)
+
+	def _invite_call(self, name, *args):
+		try:
+			return getattr(self._module("accounts_admin"), name)(*args)
+		except Exception as exc:
+			# Invitation store/transport errors must not leak their private URL
+			# through generic exception messages or the bridge exception logger.
+			code = getattr(exc, "code", None)
+			allowed = {"accounts.invite_" + item for item in ("invalid", "busy", "stale", "link_unavailable", "root", "expired", "token", "interrupted", "ineligible", "unknown", "storage", "registered")}
+			if code in allowed or code in ("run.busy", "accounts.signin_active", "accounts.unknown"):
+				raise _BridgeError(code) from None
+			raise _BridgeError("accounts.invite_storage") from None
+
+	@_method(required=("source_account_id",), optional=("operation_id",))
+	def preview_invite_account(self, request):
+		with self._settings_lock:
+			return self._invite_call("preview_invite_account", self._known_account(request["source_account_id"]), request.get("operation_id"))
+
+	@_method(required=("operation_id", "preview_token"))
+	def start_invite_account(self, request):
+		with self._settings_lock:
+			return self._invite_call("start_invite_account", _string(request["operation_id"]), _string(request["preview_token"]))
+
+	@_method()
+	def list_invite_operations(self, request):
+		return self._invite_call("list_invite_operations")
+
+	@_method(required=("operation_id", "continue_token"))
+	def continue_invite_account(self, request):
+		with self._settings_lock:
+			return self._invite_call("continue_invite_account", _string(request["operation_id"]), _string(request["continue_token"]))
+
+	@_method(required=("operation_id",))
+	def discard_invite_account(self, request):
+		with self._settings_lock:
+			return self._invite_call("discard_invite_account", _string(request["operation_id"]))
 
 	@_method(required=("account_id",))
 	def sign_in_again(self, request):

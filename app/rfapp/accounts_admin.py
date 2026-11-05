@@ -22,7 +22,7 @@ from rfapp.envfile import EnvFile
 
 
 _logger = logging.getLogger("rfapp")
-_ACTIVE_STATES = ("starting", "waiting", "verifying")
+_ACTIVE_STATES = ("starting", "waiting", "verifying", "invite_waiting")
 _LOCK_NAMES = (".rewards-farmer.lock", ".rewards-farmer.lock.json")
 _LEGACY_KEYS = ("REWARDS_ACCOUNTS", "QUERY_SOURCE", "LLM_PROVIDER", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "OPENROUTER_BASE_URL", "LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY", "LLM_REQUEST_TIMEOUT_SECONDS", "REWARDS_HEADLESS", "USE_VIRTUAL_DESKTOP", "SWITCH_BACK_TO_MAIN_DESKTOP", "SWITCH_BACK_DELAY_SECONDS", "CLEANUP_VIRTUAL_DESKTOP", "EDGE_BINARY", "MSEDGEDRIVER_PATH", "REWARDS_FARMER_LOG_LEVEL")
 _LOCAL_STATE_LIMIT = 4 * 1024 * 1024
@@ -258,6 +258,9 @@ def _free_ids(count=1, exclude=()) -> list[str]:
 	import identity
 	used.update(str(entry).casefold() for entry in identity.load(paths.data_home())["used_ids"])
 	used.update(str(alias.get("to", "")).casefold() for alias in prefs.load().get("history_aliases", []) if isinstance(alias, dict))
+	from rfapp import invite_onboarding
+	if (paths.data_home() / "invite-onboarding.json").exists():
+		used.update(invite_onboarding.reserved_targets())
 	if root.is_dir():
 		used.update(entry.name.casefold() for entry in root.iterdir())
 	result = []
@@ -346,7 +349,29 @@ def _signin_status(account_id: str) -> dict:
 			age = 31
 		if not (value["state"] == "starting" and age < 30) and not _pid_alive(value.get("pid")):
 			value.update(state="failed", error_code="crashed", message_key="accounts.signin.failed", detail="The sign-in process exited")
-	return {key: value.get(key) for key in ("account_id", "state", "error_code", "message_key", "detail", "at")}
+	result = {key: value.get(key) for key in ("account_id", "state", "error_code", "message_key", "detail", "at")}
+	if value.get("invitation"):
+		from rfapp import invite_onboarding
+		invitation = value["invitation"]
+		op_id = invitation.get("operation_id") if isinstance(invitation, dict) else None
+		try:
+			result["invitation"] = invite_onboarding.status(op_id)
+		except Exception:
+			_logger.warning("invite_status_unreadable account=%s", account_id)
+			result["invitation"] = invite_onboarding.recovery_status(op_id)
+		if not result["invitation"].get("recovery_only") and result["invitation"]["phase"] == "awaiting_confirmation":
+			import identity
+			try: pending = identity.pending(account_id, paths.data_home())
+			except identity.IdentityError: pending = None
+			if pending is not None:
+				result.update(state="awaiting_confirmation", error_code=None, message_key="accounts.signin.awaiting_confirmation", detail=None)
+			else:
+				result.update(state="invite_interrupted", error_code="enrollment_expired", message_key="accounts.invite.interrupted", detail=None)
+		if result["invitation"].get("recovery_only") or result["invitation"]["phase"] in ("interrupted", "cancelled", "discarded"):
+			result.update(state="invite_interrupted" if result["invitation"]["phase"] == "interrupted" else "cancelled", error_code=result["invitation"].get("error_code"), message_key="accounts.invite.interrupted", detail=None)
+		if result["state"] == "failed" and result["error_code"] == "crashed":
+			result["state"], result["message_key"] = "invite_interrupted", "accounts.invite.interrupted"
+	return result
 
 
 def _signin_active() -> dict | None:
@@ -424,14 +449,19 @@ def _raise_unknown():
 	raise _error("accounts.unknown")
 
 
-def _start_signin(account_id: str, new: bool, enroll=False) -> dict:
+def _start_signin(account_id: str, new: bool, enroll=False, invitation_id=None) -> dict:
 	_profile_path(account_id)
 	signin._cancel_path(account_id).unlink(missing_ok=True)
-	starting = signin._write_status(account_id, "starting", pid=0)
+	if invitation_id is not None:
+		from rfapp import invite_onboarding
+		starting = signin._write_status(account_id, "starting", pid=0, invitation=invite_onboarding.read(invitation_id))
+	else:
+		starting = signin._write_status(account_id, "starting", pid=0)
 	# Until the child rewrites the file, its 30-second grace period matters
 	# more than the window process's pid.
 	args = ["--signin", account_id, *( ["--new"] if new else [])]
 	if enroll: args.append("--enroll")
+	if invitation_id is not None: args.extend(["--invite-op", invitation_id])
 	flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 	options = {"cwd": paths.data_home(), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
 	try:
@@ -443,6 +473,53 @@ def _start_signin(account_id: str, new: bool, enroll=False) -> dict:
 		_logger.exception("Could not start the sign-in process")
 		starting = signin._write_status(account_id, "failed", "unknown", str(exc))
 	return {key: starting[key] for key in ("account_id", "state", "error_code", "message_key", "detail", "at")}
+
+
+def preview_invite_account(source_account_id, operation_id=None):
+	from rfapp import invite_onboarding as invite
+	_known_account(source_account_id)
+	_ensure_idle()
+	# The persistence lock already serializes reservations. Do not re-enter it
+	# through _free_ids; it accepts the complete reserved set explicitly here.
+	def choose(reserved):
+		used = {path.name for path in settings.user_data_dir().iterdir()} if settings.user_data_dir().exists() else set()
+		import identity
+		used.update([*settings.active_accounts(), *settings.paused_accounts(), *identity.load(paths.data_home())["used_ids"], *reserved])
+		for number in range(1, 10001):
+			candidate = f"account-{number}"
+			if candidate not in used: return candidate
+		raise invite.InviteError()
+	return {"invitation": invite.prepare(source_account_id, choose, operation_id)}
+
+
+def start_invite_account(operation_id, preview_token):
+	from rfapp import invite_onboarding as invite
+	_ensure_idle()
+	operation = invite.launch(operation_id, preview_token)
+	try:
+		status = _start_signin(operation["target_account_id"], True, enroll=True, invitation_id=operation_id)
+		if status["state"] == "failed": invite.interrupt(operation_id)
+	except Exception:
+		invite.interrupt(operation_id)
+		raise invite.InviteError("invite_unknown") from None
+	return {"account_id": operation["target_account_id"], "signin": {**status, "invitation": invite.read(operation_id)}}
+
+
+def list_invite_operations():
+	from rfapp import invite_onboarding as invite
+	return {"operations": invite.list_operations(_pid_alive)}
+
+
+def continue_invite_account(operation_id, continue_token):
+	from rfapp import invite_onboarding as invite
+	operation = invite.continue_operation(operation_id, continue_token, _pid_alive)
+	return {"invitation": operation}
+
+
+def discard_invite_account(operation_id):
+	from rfapp import invite_onboarding as invite
+	_ensure_idle()
+	return {"invitation": invite.discard(operation_id, _recycle, _pid_alive)}
 
 
 def _add_account(confirm_migration=False) -> dict:
@@ -655,6 +732,8 @@ def confirm_enrollment(account_id, confirmation_token, confirmed):
 	pending = identity.pending(account_id, paths.data_home())
 	if pending is None or not secrets.compare_digest(pending["token"], confirmation_token):
 		raise _error("accounts.enrollment_required")
+	from rfapp import invite_onboarding as invite
+	invite_op = None
 	before = identity.load(paths.data_home())
 	old = identity.binding(account_id, paths.data_home())
 	if old is not None and old["expected_name_hash"] != pending["observed_hash"]:
@@ -671,7 +750,21 @@ def confirm_enrollment(account_id, confirmation_token, confirmed):
 	editor = EnvFile.load(paths.env_path())
 	prefs_before = paths.prefs_path().read_bytes() if paths.prefs_path().exists() else None
 	env_before = paths.env_path().read_bytes() if paths.env_path().exists() else None
+	new_account = pending["new"] and account_id not in [*settings.active_accounts(), *settings.paused_accounts()]
+	origin = pending.get("invitation_operation_id")
+	if origin is None and new_account and (paths.data_home() / "invite-onboarding.json").exists(): origin = invite.pending_origin(account_id, confirmation_token)
+	needs_invitation = origin is not None or new_account
+	invitation = invite.for_target(account_id) if needs_invitation and (paths.data_home() / "invite-onboarding.json").exists() else None
+	if invitation is not None and invitation["phase"] == "admitting": raise invite.InviteError("invite_busy")
 	try:
+		if origin is not None:
+			if invitation is None or invitation["operation_id"] != origin or invitation["phase"] != "awaiting_confirmation": raise invite.InviteError("invite_token")
+		if new_account and invitation is not None and invitation["phase"] != "awaiting_confirmation": raise invite.InviteError("invite_token")
+		if invitation is not None and invitation["phase"] == "awaiting_confirmation":
+			# Retain the operation identity even if the admitting write raises
+			# after replacing the file, so rollback cannot strand that phase.
+			invite_op = invitation["operation_id"]
+			invite.admit(account_id, confirmation_token)
 		identity.save(value, paths.data_home())
 		if value["mode"] == "managed": prefs.save({"identity_managed": True})
 		if pending["new"]:
@@ -679,12 +772,22 @@ def confirm_enrollment(account_id, confirmation_token, confirmed):
 			editor.save()
 		value["pending"].pop(account_id, None)
 		identity.save(value, paths.data_home())
-	except OSError:
-		identity.save(before, paths.data_home())
-		if prefs_before is None: paths.prefs_path().unlink(missing_ok=True)
-		else: _restore_document(paths.prefs_path(), prefs_before)
-		if env_before is None: paths.env_path().unlink(missing_ok=True)
-		else: _restore_document(paths.env_path(), env_before)
+		if invite_op is not None: invite.finish_admission(invite_op, True)
+	except BaseException as exc:
+		# Roll back every document independently, including non-I/O exceptions.
+		# A failed cleanup keeps a value-free cause and never calls the scheduler.
+		rollback_failed = False
+		for action in (lambda: identity.save(before, paths.data_home()),
+			lambda: paths.prefs_path().unlink(missing_ok=True) if prefs_before is None else _restore_document(paths.prefs_path(), prefs_before),
+			lambda: paths.env_path().unlink(missing_ok=True) if env_before is None else _restore_document(paths.env_path(), env_before)):
+			try: action()
+			except Exception: rollback_failed = True
+		if invite_op is not None:
+			try: invite.admission_failed(invite_op)
+			except Exception: rollback_failed = True
+		_logger.warning("enrollment_rollback account=%s cause=%s cleanup=%s", account_id, type(exc).__name__, "incomplete" if rollback_failed else "returned")
+		if not isinstance(exc, Exception): raise
+		if invite_op is None and isinstance(exc, invite.InviteError): raise
 		raise _error("accounts.enrollment_save_failed") from None
 	if pending["new"]:
 		from rfapp import schedule
@@ -694,6 +797,17 @@ def confirm_enrollment(account_id, confirmation_token, confirmed):
 
 def _cancel_signin(account_id: str) -> None:
 	status = _signin_status(account_id)
+	if status.get("invitation"):
+		from rfapp import invite_onboarding as invite
+		op = status["invitation"]
+		if op.get("recovery_only"):
+			invite.discard(op["operation_id"], _recycle, _pid_alive)
+			signin._write_status(account_id, "cancelled")
+		else:
+			invite.interrupt(op["operation_id"], cancelled=True)
+			if status["state"] in _ACTIVE_STATES: signin._cancel_path(account_id).write_text("", encoding="utf-8")
+			signin._write_status(account_id, "cancelled", invitation=invite.status(op["operation_id"]))
+		return
 	import identity
 	value = identity.load(paths.data_home())
 	if account_id in value["pending"]:

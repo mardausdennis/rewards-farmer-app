@@ -322,6 +322,42 @@ class RuntimeTests(unittest.TestCase):
 		with patch.object(window, "_theme", return_value="light"):
 			self.assertEqual(self.runtime._observe_once(), 5)
 
+	def test_revision_invite_waiting_liveness_and_bad_status_do_not_abort_observer(self):
+		import json
+		path = self.home / "signin-account-2.json"
+		path.write_text(json.dumps({"account_id": "account-2", "invitation": {"operation_id": "invite-" + "1" * 32}}), encoding="utf-8")
+		admin = SimpleNamespace(get_signin_status=Mock(return_value={"account_id": "account-2", "state": "invite_waiting"}))
+		self.api._dependencies["accounts_admin"] = admin
+		self.assertEqual(self.runtime._observe_once(), .5)
+		self.assertNotIn(path, self.runtime._signin_files)
+		self.assertTrue(self.runtime._idle_active)
+		# No file mutation: an alive invite_waiting child must still be queried
+		# next tick so a dead child becomes terminal and clears Continue/spinner.
+		admin.get_signin_status.return_value = {"account_id": "account-2", "state": "invite_interrupted", "error_code": "crashed"}
+		self.runtime.push.reset_mock()
+		self.runtime._observe_once()
+		self.assertEqual(admin.get_signin_status.call_count, 2)
+		self.runtime.push.assert_any_call("signin.status", admin.get_signin_status.return_value)
+		self.assertIn(path, self.runtime._signin_files)
+		# A stale/corrupt invitation cannot stop another account or tail pushes.
+		path.write_text(json.dumps({"account_id": "account-2", "invitation": {"operation_id": "invite-" + "1" * 32}, "revision": 1}), encoding="utf-8")
+		(self.home / "signin-account-3.json").write_text('{"account_id":"account-3"}', encoding="utf-8")
+		def projected(account):
+			if account == "account-2": raise ValueError("private invitation text must not escape")
+			return {"account_id": "account-3", "state": "signed_in"}
+		admin.get_signin_status.side_effect = projected
+		self.runtime._scan_requested = True
+		self.runtime.push.reset_mock()
+		self.runtime._tail.poll.reset_mock()
+		with patch.object(window._log, "warning") as warning:
+			self.runtime._observe_once()
+		self.assertEqual(self.runtime._signins["account-2"]["state"], "invite_interrupted")
+		self.assertEqual(self.runtime._signins["account-3"]["state"], "signed_in")
+		self.runtime.push.assert_any_call("signin.status", {"account_id": "account-3", "state": "signed_in"})
+		self.runtime.push.assert_any_call("overview.changed", {})
+		self.runtime._tail.poll.assert_called_once()
+		self.assertNotIn("private invitation", str(warning.call_args))
+
 	def test_terminal_signin_file_is_read_only_after_its_stamp_changes(self):
 		path = self.home / "signin-account-1.json"
 		path.write_text('{"account_id":"account-1"}', encoding="utf-8")

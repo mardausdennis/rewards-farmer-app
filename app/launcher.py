@@ -95,6 +95,13 @@ def main(argv=None):
 			accounts = [part.strip() for part in args[2].split(",")]
 		return supervise(kind, accounts) if accounts is not None else supervise(kind)
 	if token == "--signin":
+		if "--invite-op" in args:
+			if len(args) != 6 or args[2:5] != ["--new", "--enroll", "--invite-op"]: return 2
+			from rfapp.invite_onboarding import operation_id
+			try: op_id = operation_id(args[5])
+			except ValueError: return 2
+			from rfapp.signin import run
+			return run(args[1], new=True, enroll=True, invitation_id=op_id)
 		if len(args) < 2 or len(args) > 4 or len(set(args[2:])) != len(args[2:]) or any(value not in ("--new", "--enroll") for value in args[2:]):
 			return 2
 		from rfapp.signin import run

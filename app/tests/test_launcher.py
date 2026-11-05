@@ -23,6 +23,14 @@ _SPEC.loader.exec_module(launcher)
 
 
 class LauncherTests(unittest.TestCase):
+	def test_invite_operation_only_opaque_exact_arguments(self):
+		call = Mock(return_value=0)
+		op_id = "invite-" + "1" * 32
+		with patch.dict(sys.modules, {"rfapp.signin": SimpleNamespace(run=call)}):
+			self.assertEqual(launcher.main(["--signin", "account-3", "--new", "--enroll", "--invite-op", op_id]), 0)
+			call.assert_called_once_with("account-3", new=True, enroll=True, invitation_id=op_id)
+			for bad in (["--signin", "account-3", "--invite-op", op_id], ["--signin", "account-3", "--new", "--enroll", "--invite-op", "https://private.invalid/"], ["--signin", "account-3", "--new", "--enroll", "--invite-op", op_id, "extra"]):
+				self.assertEqual(launcher.main(bad), 2)
 	def setUp(self):
 		import rfapp
 		self.real_popen = subprocess.Popen

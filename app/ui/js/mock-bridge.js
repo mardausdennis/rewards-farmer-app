@@ -1,4 +1,4 @@
-const methodNames = ["ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_invited_friends", "save_invited_friend", "remove_invited_friend", "get_referral_info", "get_account_picture", "add_account", "sign_in_again", "get_signin_status", "begin_enrollment", "get_enrollment_status", "confirm_enrollment", "cancel_signin", "rename_account", "set_account_paused", "remove_account"];
+const methodNames = ["ui_ready", "app_info", "open_external", "get_overview", "get_stats", "get_live", "get_history", "get_run", "get_run_log", "start_run", "stop_run", "set_goal", "get_settings", "save_settings", "get_schedule_status", "replace_legacy_task", "pick_path", "list_ollama_models", "export_diagnostics", "check_updates", "dismiss_update", "get_legacy_install", "import_legacy_install", "complete_setup", "list_accounts", "get_invited_friends", "save_invited_friend", "remove_invited_friend", "get_referral_info", "get_account_picture", "add_account", "preview_invite_account", "start_invite_account", "list_invite_operations", "continue_invite_account", "discard_invite_account", "sign_in_again", "get_signin_status", "begin_enrollment", "get_enrollment_status", "confirm_enrollment", "cancel_signin", "rename_account", "set_account_paused", "remove_account"];
 const failure = (method) => ({ ok: false, error: { code: "internal", message_key: "errors.app.internal", params: {}, detail: `Mock method ${method} has no matching response`, fields: null } });
 
 function jsonEqual(first, second) {
@@ -39,6 +39,7 @@ export async function install() {
     const methods = {
         get_invited_friends: { ok: true, data: { invited_friends: [] } },
         get_referral_info: { ok: true, data: { link: null, link_found: false, referrals: null, friends: null, read_at: null, unreadable: "not_read" } },
+        list_invite_operations: { ok: true, data: { operations: [] } },
         ...defaults.methods, ...(multiSeed?.methods || {}), ...chosen.methods,
     };
     const timers = new Set();

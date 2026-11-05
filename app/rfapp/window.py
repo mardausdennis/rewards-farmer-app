@@ -570,20 +570,32 @@ class _Runtime:
 		for status_file, stamp in signins.items():
 			if self._signin_files.get(status_file) == stamp:
 				continue
-			account_id = json.loads(read_file(status_file))["account_id"]
-			status = self._bridge._module("accounts_admin").get_signin_status(account_id)
+			value = None
+			try:
+				value = json.loads(read_file(status_file))
+				account_id = value["account_id"]
+				status = self._bridge._module("accounts_admin").get_signin_status(account_id)
+				if not isinstance(status, dict) or status.get("account_id") != account_id or not isinstance(status.get("state"), str): raise ValueError("Invalid sign-in projection")
+			except Exception as exc:
+				# One stale/corrupt invitation must not abort live-tail, tray or
+				# other sign-in observation. Never log the private exception text.
+				account_id = status_file.stem[len("signin-"):]
+				if account_id == "root": account_id = "@root"
+				invited = isinstance(value, dict) and bool(value.get("invitation"))
+				status = {"account_id": account_id, "state": "invite_interrupted" if invited else "failed", "error_code": "accounts.invite_storage" if invited else "crashed", "message_key": "accounts.invite.interrupted" if invited else "accounts.signin.failed", "detail": None}
+				if self._signins.get(account_id) != status: _log.warning("signin_observation_unreadable class=%s", type(exc).__name__)
 			if self._signins.get(account_id) != status:
 				self._signins[account_id] = status
 				self.push("signin.status", status)
 				self.push("overview.changed", {})
 				self._refresh_context()
-			if status["state"] not in ("starting", "waiting", "verifying"):
+			if status["state"] not in ("starting", "waiting", "verifying", "invite_waiting"):
 				self._signin_files[status_file] = self._stamp(status_file)
 		self._signin_files = {path: stamp for path, stamp in self._signin_files.items() if path in signins}
 		live_signin_ids = {status_file.stem[len("signin-"):] for status_file in signins}
 		self._signins = {account: status for account, status in self._signins.items() if account.replace("@", "") in live_signin_ids}
 		active = bool(self._bridge._module("runs").active_run_id()) if changed or self._tray_dirty or self._idle_active else False
-		signin_active = any(status["state"] in ("starting", "waiting", "verifying") for status in self._signins.values())
+		signin_active = any(status["state"] in ("starting", "waiting", "verifying", "invite_waiting") for status in self._signins.values())
 		self._idle_active = active or signin_active or bool(self._pending_runs)
 		if changed or self._tray_dirty:
 			self._tray_dirty = False

@@ -1,10 +1,11 @@
-export const activeStates = new Set(["starting", "waiting", "verifying"]);
+export const activeStates = new Set(["starting", "waiting", "verifying", "invite_waiting"]);
 export const statusKeys = {
     starting: "accounts.signin.starting", waiting: "accounts.signin.waiting",
     verifying: "accounts.signin.verifying", signed_in: "accounts.signin.signed_in",
     failed: "accounts.signin.failed", timed_out: "accounts.signin.timed_out",
     cancelled: "accounts.signin.cancelled", busy: "accounts.signin.busy",
     awaiting_confirmation: "accounts.signin.awaiting_confirmation",
+    invite_waiting: "accounts.invite.waiting", invite_interrupted: "accounts.invite.interrupted",
 };
 
 // Both owned screens follow the same backend state, without polling or opening a URL.
@@ -71,6 +72,18 @@ export function signinFlow(ctx, { accepts = () => true, changed, connected, awai
         flow.cancelling = false;
         ctx.store.set("signin", flow.status);
         notify();
+    };
+    flow.continueInvite = async () => {
+        const invitation = flow.status?.invitation;
+        if (!invitation || invitation.phase !== "invite_open" || flow.pending) return;
+        flow.pending = true;
+        flow.error = null;
+        notify();
+        try {
+            await ctx.bridge.call("continue_invite_account", { operation_id: invitation.operation_id, continue_token: invitation.continue_token });
+            if (alive && flow.status?.invitation?.operation_id === invitation.operation_id) receive({ ...flow.status, invitation: { ...invitation, phase: "continue_requested", continue_token: null } }, true);
+        } catch (error) { if (alive) flow.error = error; }
+        finally { flow.pending = false; notify(); }
     };
     flow.seed = () => receive(ctx.store.get("signin"));
     flow.dispose = () => { alive = false; off(); };

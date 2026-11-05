@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "This invitation operation is not valid. Open a new preview from Accounts.", "note": "Malformed operation, path, source or token contract. No private values in detail."},
+    "errors.app.accounts_invite_busy": {"text": "Finish, resume or discard the pending invitation setup first.", "note": "Serialized invitation operation or browser profile is busy."},
+    "errors.app.accounts_invite_stale": {"text": "The source or invitation changed. Review a fresh preview before opening it.", "note": "Never fall back to another link or account after preview."},
+    "errors.app.accounts_invite_link_unavailable": {"text": "This account has no safe saved invitation link. Choose another source or use ordinary sign-in.", "note": "No valid stored link. Do not invent a developer link."},
+    "errors.app.accounts_invite_root": {"text": "Use ordinary Add account to finish the older profile's move first. Invitation setup cannot move that profile.", "note": "Optional branch fails closed for root-profile migration. Existing normal migration is unchanged."},
+    "errors.app.accounts_invite_expired": {"text": "This preview expired. Review it again before opening the invitation.", "note": "Expired preview cannot start the child."},
+    "errors.app.accounts_invite_token": {"text": "This action is stale or was already used. Check the current invitation setup.", "note": "Wrong operation, duplicate or stale per-operation token."},
+    "errors.app.accounts_invite_interrupted": {"text": "The invitation window is no longer available. Resume from a fresh preview.", "note": "No hidden sign-in verification after browser close."},
+    "errors.app.accounts_invite_ineligible": {"text": "Confirm the existing accounts before using an invitation for a new account.", "note": "Local enrollment prerequisite, not Microsoft's referral eligibility."},
+    "errors.app.accounts_invite_unknown": {"text": "Invitation setup could not finish. Its new profile was kept for recovery.", "note": "Private exception message is never shown."},
+    "errors.app.accounts_invite_storage": {"text": "Invitation setup could not be saved or discarded safely. Its data was kept.", "note": "Persistence or owned-profile discard failed."},
+    "errors.app.accounts_invite_registered": {"text": "This account is already connected. Invitation setup cannot discard it.", "note": "Admission is not proof of Microsoft referral acceptance."},
     "errors.app.accounts_enrollment_required": {"text": "Confirm the existing accounts before adding another.", "note": "Enrollment is required before multi-account registration."},
     "errors.app.accounts_enrollment_pending": {"text": "Confirm or cancel the account waiting for confirmation first.", "note": "A pending enrollment must finish before another account is added."},
     "errors.app.accounts_enrollment_expired": {"text": "This confirmation expired. Sign in again to confirm the account.", "note": "An expired token is not a new confirmation."},

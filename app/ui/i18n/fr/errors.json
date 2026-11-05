@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "Cette opération d’invitation est invalide. Ouvrez un nouvel aperçu dans Comptes.", "src": "b2620b09"},
+    "errors.app.accounts_invite_busy": {"text": "Terminez, reprenez ou abandonnez d’abord la configuration par invitation en attente.", "src": "c63995e5"},
+    "errors.app.accounts_invite_stale": {"text": "La source ou l’invitation a changé. Vérifiez un nouvel aperçu avant de l’ouvrir.", "src": "44f0cd85"},
+    "errors.app.accounts_invite_link_unavailable": {"text": "Ce compte n’a aucun lien d’invitation sûr enregistré. Choisissez une autre source ou la connexion normale.", "src": "e3d7c6fe"},
+    "errors.app.accounts_invite_root": {"text": "Utilisez d’abord Ajouter un compte pour terminer le déplacement de l’ancien profil. La configuration par invitation ne peut pas le déplacer.", "src": "7d1a2664"},
+    "errors.app.accounts_invite_expired": {"text": "Cet aperçu a expiré. Consultez-le de nouveau avant d’ouvrir l’invitation.", "src": "52b0c216"},
+    "errors.app.accounts_invite_token": {"text": "Cette action est périmée ou a déjà été utilisée. Vérifiez la configuration par invitation actuelle.", "src": "6f74aa88"},
+    "errors.app.accounts_invite_interrupted": {"text": "La fenêtre d’invitation n’est plus disponible. Reprenez depuis un nouvel aperçu.", "src": "803f7c04"},
+    "errors.app.accounts_invite_ineligible": {"text": "Confirmez les comptes existants avant d’utiliser une invitation pour un nouveau compte.", "src": "103e2ab9"},
+    "errors.app.accounts_invite_unknown": {"text": "La configuration par invitation n’a pas pu se terminer. Son nouveau profil a été conservé pour la reprise.", "src": "3c798d8a"},
+    "errors.app.accounts_invite_storage": {"text": "La configuration par invitation n’a pas pu être enregistrée ou abandonnée en toute sécurité. Ses données ont été conservées.", "src": "2ec842de"},
+    "errors.app.accounts_invite_registered": {"text": "Ce compte est déjà connecté. La configuration par invitation ne peut pas l’abandonner.", "src": "4771edcf"},
     "errors.app.accounts_enrollment_required": {"text": "Confirmez les comptes existants avant d’en ajouter un autre.", "src": "38a2a24f"},
     "errors.app.accounts_enrollment_pending": {"text": "Confirmez ou annulez d’abord le compte en attente de confirmation.", "src": "38877ef1"},
     "errors.app.accounts_enrollment_expired": {"text": "Cette confirmation a expiré. Reconnectez-vous pour confirmer le compte.", "src": "c4a47edc"},

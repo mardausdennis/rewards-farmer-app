@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "Esta operación de invitación no es válida. Abre una nueva vista previa en Cuentas.", "src": "b2620b09"},
+    "errors.app.accounts_invite_busy": {"text": "Primero termina, reanuda o descarta la configuración con invitación pendiente.", "src": "c63995e5"},
+    "errors.app.accounts_invite_stale": {"text": "El origen o la invitación cambió. Revisa una nueva vista previa antes de abrirla.", "src": "44f0cd85"},
+    "errors.app.accounts_invite_link_unavailable": {"text": "Esta cuenta no tiene un enlace de invitación seguro guardado. Elige otro origen o el inicio de sesión normal.", "src": "e3d7c6fe"},
+    "errors.app.accounts_invite_root": {"text": "Usa Añadir cuenta para terminar de mover el perfil antiguo primero. La configuración con invitación no puede moverlo.", "src": "7d1a2664"},
+    "errors.app.accounts_invite_expired": {"text": "Esta vista previa caducó. Revísala de nuevo antes de abrir la invitación.", "src": "52b0c216"},
+    "errors.app.accounts_invite_token": {"text": "Esta acción está desactualizada o ya se usó. Comprueba la configuración con invitación actual.", "src": "6f74aa88"},
+    "errors.app.accounts_invite_interrupted": {"text": "La ventana de invitación ya no está disponible. Reanuda desde una nueva vista previa.", "src": "803f7c04"},
+    "errors.app.accounts_invite_ineligible": {"text": "Confirma las cuentas existentes antes de usar una invitación para una cuenta nueva.", "src": "103e2ab9"},
+    "errors.app.accounts_invite_unknown": {"text": "La configuración con invitación no pudo terminar. Se conservó su perfil nuevo para recuperarla.", "src": "3c798d8a"},
+    "errors.app.accounts_invite_storage": {"text": "No se pudo guardar ni descartar con seguridad la configuración con invitación. Se conservaron sus datos.", "src": "2ec842de"},
+    "errors.app.accounts_invite_registered": {"text": "Esta cuenta ya está conectada. La configuración con invitación no puede descartarla.", "src": "4771edcf"},
     "errors.app.accounts_enrollment_required": {"text": "Confirma las cuentas existentes antes de agregar otra.", "src": "38a2a24f"},
     "errors.app.accounts_enrollment_pending": {"text": "Primero confirma o cancela la cuenta pendiente de confirmación.", "src": "38877ef1"},
     "errors.app.accounts_enrollment_expired": {"text": "Esta confirmación caducó. Vuelve a iniciar sesión para confirmar la cuenta.", "src": "c4a47edc"},

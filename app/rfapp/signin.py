@@ -27,11 +27,17 @@ def _cancel_path(account_id: str) -> Path:
 	return paths.runs_dir() / f"signin-{account_id.replace('@', '')}.cancel"
 
 
-def _write_status(account_id: str, state: str, error_code: str | None = None, detail: str | None = None, pid: int | None = None) -> dict:
+def _write_status(account_id: str, state: str, error_code: str | None = None, detail: str | None = None, pid: int | None = None, invitation=None) -> dict:
 	message = f"errors.browser.{error_code}" if state == "failed" and error_code not in (None, "crashed") else f"accounts.signin.{state}"
 	if error_code == "terms_of_use":
 		message = "errors.state.terms_of_use"
 	value = {"account_id": account_id, "state": state, "error_code": error_code, "message_key": message, "detail": detail, "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"), "pid": os.getpid() if pid is None else pid}
+	if invitation is not None:
+		value["invitation"] = {key: invitation.get(key) for key in ("operation_id", "phase", "source_account_id", "target_account_id", "continue_token", "referral_status", "can_resume", "can_discard")}
+		if state in ("invite_waiting", "invite_interrupted"):
+			value["message_key"] = "accounts.invite." + ("waiting" if state == "invite_waiting" else "interrupted")
+		if isinstance(error_code, str) and error_code.startswith("accounts.invite_"):
+			value["message_key"] = "errors.app." + error_code.replace(".", "_")
 	path = _status_path(account_id)
 	name = None
 	try:
@@ -55,7 +61,77 @@ def _quit(driver) -> None:
 			_logger.warning("Could not close the sign-in browser")
 
 
-def run(account_id, new, enroll=False) -> int:
+def _run_invitation(account_id, op_id):
+	"""Only explicit continuation permits dashboard/identity reads in this branch."""
+	import accounts
+	import browser
+	import identity
+	import referrals
+	import run_lock
+	from selenium import webdriver
+	from rfapp import accounts_admin, invite_onboarding as invite
+	lock = run_lock.acquire("signin", account=account_id, directory=str(settings.user_data_dir()))
+	if lock is None:
+		invite.interrupt(op_id, "invite_busy")
+		_write_status(account_id, "busy", invitation=invite.read(op_id))
+		return 3
+	visible = None
+	state, code = "invite_interrupted", None
+	try:
+		owned = invite.child_begin(op_id, account_id)
+		account = accounts.Account(account_id, str(owned["profile"]), "Default")
+		with referrals._private_transport():
+			# Do not inherit the ordinary branch's opt-in verbose driver log: it
+			# records navigation commands containing this private invitation URL.
+			service = webdriver.EdgeService(executable_path=os.environ.get("MSEDGEDRIVER_PATH") or None, service_args=["--silent"], log_output=os.devnull)
+			visible = webdriver.Edge(options=browser.build_options(account), service=service)
+			visible.set_page_load_timeout(60)
+			# This is the first navigation. No dashboard, balance or identity probe
+			# can run until the matching per-operation continue command is consumed.
+			visible.get(owned["link"])
+			status = invite.child_phase(op_id, "invite_open")
+			_write_status(account_id, "invite_waiting", invitation=status)
+			deadline = time.monotonic() + 900
+			while time.monotonic() < deadline:
+				if _cancel_path(account_id).exists():
+					invite.interrupt(op_id, cancelled=True)
+					state = "cancelled"
+					break
+				operation = invite.read(op_id)
+				if operation["phase"] not in ("invite_open", "continue_requested"):
+					break
+				try:
+					if not visible.window_handles: break
+				except Exception:
+					break
+				if operation["phase"] == "continue_requested":
+					invite.child_phase(op_id, "verifying")
+					_write_status(account_id, "verifying", invitation=invite.read(op_id))
+					visible.get("https://rewards.bing.com/")
+					candidate = accounts_admin._profile_identity(account_id).get("name")
+					matched, _ = identity.read_dashboard_identity(visible, candidate)
+					if matched != "match":
+						code = "identity_unknown" if matched == "unknown" else "accounts.identity_mismatch"
+						break
+					invite.stage_confirmation(op_id, candidate)
+					state = "awaiting_confirmation"
+					break
+				time.sleep(.25)
+	except Exception as exc:
+		# Do not emit exception messages: Selenium may include the invitation URL.
+		code = exc.code if getattr(exc, "code", "").startswith("accounts.invite_") else "accounts.invite_unknown"
+	finally:
+		with referrals._private_transport(): _quit(visible)
+		try:
+			if state not in ("awaiting_confirmation", "cancelled"):
+				invite.interrupt(op_id)
+			_write_status(account_id, state, code, invitation=invite.read(op_id))
+			_cancel_path(account_id).unlink(missing_ok=True)
+		finally: lock.release()
+	return 0 if state == "awaiting_confirmation" else 1
+
+
+def run(account_id, new, enroll=False, invitation_id=None) -> int:
 	import dotenv
 	try:
 		text = read_file(paths.env_path())
@@ -77,6 +153,15 @@ def run(account_id, new, enroll=False) -> int:
 
 	if not isinstance(account_id, str) or new and account_id == "@root" or account_id != "@root" and not accounts.directory_name_is_valid(account_id):
 		raise ValueError("Invalid profile id")
+	if invitation_id is not None:
+		from rfapp import invite_onboarding
+		invite_onboarding.operation_id(invitation_id)
+		if not new or not enroll: return 2
+		return _run_invitation(account_id, invitation_id)
+	from rfapp import invite_onboarding
+	if account_id not in [*settings.active_accounts(), *settings.paused_accounts()] and (paths.data_home() / "invite-onboarding.json").exists() and (operation := invite_onboarding.for_target(account_id)) is not None:
+		_write_status(account_id, "invite_interrupted", invitation=operation)
+		return 2
 	if enroll and not new and account_id not in [*settings.active_accounts(), *settings.paused_accounts()]:
 		_write_status(account_id, "failed", "enrollment_required")
 		return 1

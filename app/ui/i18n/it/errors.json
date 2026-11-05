@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "Questa operazione di invito non è valida. Apri una nuova anteprima in Account.", "src": "b2620b09"},
+    "errors.app.accounts_invite_busy": {"text": "Prima termina, riprendi o elimina la configurazione con invito in sospeso.", "src": "c63995e5"},
+    "errors.app.accounts_invite_stale": {"text": "La fonte o l’invito è cambiato. Controlla una nuova anteprima prima di aprirlo.", "src": "44f0cd85"},
+    "errors.app.accounts_invite_link_unavailable": {"text": "Questo account non ha un link di invito sicuro salvato. Scegli un’altra fonte o l’accesso normale.", "src": "e3d7c6fe"},
+    "errors.app.accounts_invite_root": {"text": "Usa prima Aggiungi account per completare lo spostamento del vecchio profilo. La configurazione con invito non può spostarlo.", "src": "7d1a2664"},
+    "errors.app.accounts_invite_expired": {"text": "Questa anteprima è scaduta. Controllala di nuovo prima di aprire l’invito.", "src": "52b0c216"},
+    "errors.app.accounts_invite_token": {"text": "Questa azione è scaduta o è già stata usata. Controlla la configurazione con invito attuale.", "src": "6f74aa88"},
+    "errors.app.accounts_invite_interrupted": {"text": "La finestra dell’invito non è più disponibile. Riprendi da una nuova anteprima.", "src": "803f7c04"},
+    "errors.app.accounts_invite_ineligible": {"text": "Conferma gli account esistenti prima di usare un invito per un nuovo account.", "src": "103e2ab9"},
+    "errors.app.accounts_invite_unknown": {"text": "La configurazione con invito non è riuscita a terminare. Il nuovo profilo è stato conservato per il ripristino.", "src": "3c798d8a"},
+    "errors.app.accounts_invite_storage": {"text": "Non è stato possibile salvare o eliminare la configurazione con invito in sicurezza. I dati sono stati conservati.", "src": "2ec842de"},
+    "errors.app.accounts_invite_registered": {"text": "Questo account è già collegato. La configurazione con invito non può eliminarlo.", "src": "4771edcf"},
     "errors.app.accounts_enrollment_required": {"text": "Conferma gli account esistenti prima di aggiungerne un altro.", "src": "38a2a24f"},
     "errors.app.accounts_enrollment_pending": {"text": "Prima conferma o annulla l'account in attesa di conferma.", "src": "38877ef1"},
     "errors.app.accounts_enrollment_expired": {"text": "Questa conferma è scaduta. Accedi di nuovo per confermare l'account.", "src": "c4a47edc"},

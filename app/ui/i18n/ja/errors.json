@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "この招待操作は無効です。アカウント画面で新しいプレビューを開いてください。", "src": "b2620b09"},
+    "errors.app.accounts_invite_busy": {"text": "先に保留中の招待設定を完了、再開、または破棄してください。", "src": "c63995e5"},
+    "errors.app.accounts_invite_stale": {"text": "招待元または招待が変わりました。開く前に新しいプレビューを確認してください。", "src": "44f0cd85"},
+    "errors.app.accounts_invite_link_unavailable": {"text": "このアカウントには安全な招待リンクが保存されていません。別の招待元か通常のサインインを選んでください。", "src": "e3d7c6fe"},
+    "errors.app.accounts_invite_root": {"text": "先に通常のアカウント追加で古いプロファイルの移動を完了してください。招待設定では移動できません。", "src": "7d1a2664"},
+    "errors.app.accounts_invite_expired": {"text": "このプレビューは期限切れです。招待を開く前に再確認してください。", "src": "52b0c216"},
+    "errors.app.accounts_invite_token": {"text": "この操作は古いか、すでに使われています。現在の招待設定を確認してください。", "src": "6f74aa88"},
+    "errors.app.accounts_invite_interrupted": {"text": "招待ウィンドウは利用できなくなりました。新しいプレビューから再開してください。", "src": "803f7c04"},
+    "errors.app.accounts_invite_ineligible": {"text": "新しいアカウントで招待を使う前に、既存のアカウントを確認してください。", "src": "103e2ab9"},
+    "errors.app.accounts_invite_unknown": {"text": "招待設定を完了できませんでした。再開できるよう新しいプロファイルは保持されました。", "src": "3c798d8a"},
+    "errors.app.accounts_invite_storage": {"text": "招待設定を安全に保存または破棄できませんでした。データは保持されました。", "src": "2ec842de"},
+    "errors.app.accounts_invite_registered": {"text": "このアカウントは接続済みです。招待設定からは破棄できません。", "src": "4771edcf"},
     "errors.app.accounts_enrollment_required": {"text": "別のアカウントを追加する前に、既存のアカウントを確認してください。", "src": "38a2a24f"},
     "errors.app.accounts_enrollment_pending": {"text": "確認待ちのアカウントを先に確認またはキャンセルしてください。", "src": "38877ef1"},
     "errors.app.accounts_enrollment_expired": {"text": "確認の有効期限が切れました。もう一度サインインしてアカウントを確認してください。", "src": "c4a47edc"},

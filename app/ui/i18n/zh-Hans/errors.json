@@ -1,6 +1,18 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_invite_invalid": {"text": "此邀请操作无效。请在账户页面打开新的预览。", "src": "b2620b09"},
+    "errors.app.accounts_invite_busy": {"text": "请先完成、恢复或放弃待处理的邀请设置。", "src": "c63995e5"},
+    "errors.app.accounts_invite_stale": {"text": "来源或邀请已更改。打开前请检查新的预览。", "src": "44f0cd85"},
+    "errors.app.accounts_invite_link_unavailable": {"text": "此账户没有已保存的安全邀请链接。请选择其他来源或使用普通登录。", "src": "e3d7c6fe"},
+    "errors.app.accounts_invite_root": {"text": "请先通过普通的添加账户流程完成旧配置文件的迁移。邀请设置不能迁移该配置文件。", "src": "7d1a2664"},
+    "errors.app.accounts_invite_expired": {"text": "此预览已过期。打开邀请前请再次检查。", "src": "52b0c216"},
+    "errors.app.accounts_invite_token": {"text": "此操作已失效或已经使用。请检查当前邀请设置。", "src": "6f74aa88"},
+    "errors.app.accounts_invite_interrupted": {"text": "邀请窗口已不可用。请从新的预览恢复。", "src": "803f7c04"},
+    "errors.app.accounts_invite_ineligible": {"text": "为新账户使用邀请前，请先确认现有账户。", "src": "103e2ab9"},
+    "errors.app.accounts_invite_unknown": {"text": "邀请设置未能完成，新的配置文件已保留以便恢复。", "src": "3c798d8a"},
+    "errors.app.accounts_invite_storage": {"text": "无法安全保存或放弃邀请设置，数据已保留。", "src": "2ec842de"},
+    "errors.app.accounts_invite_registered": {"text": "此账户已连接，邀请设置不能将其丢弃。", "src": "4771edcf"},
     "errors.app.accounts_enrollment_required": {"text": "请先确认现有帐户，再添加其他帐户。", "src": "38a2a24f"},
     "errors.app.accounts_enrollment_pending": {"text": "请先确认或取消等待确认的帐户。", "src": "38877ef1"},
     "errors.app.accounts_enrollment_expired": {"text": "本次确认已过期。请重新登录以确认帐户。", "src": "c4a47edc"},
