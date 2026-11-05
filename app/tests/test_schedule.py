@@ -133,7 +133,7 @@ class SchedulePureTests(unittest.TestCase):
 
 	def test_all_task_flags_and_order(self):
 		root = tree()
-		expected = {"MultipleInstancesPolicy": "IgnoreNew", "DisallowStartIfOnBatteries": "false", "StopIfGoingOnBatteries": "false", "AllowHardTerminate": "true", "StartWhenAvailable": "true", "RunOnlyIfNetworkAvailable": "true", "AllowStartOnDemand": "true", "Enabled": "true", "Hidden": "false", "RunOnlyIfIdle": "false", "WakeToRun": "false", "ExecutionTimeLimit": "PT1H", "Priority": "5"}
+		expected = {"MultipleInstancesPolicy": "IgnoreNew", "DisallowStartIfOnBatteries": "false", "StopIfGoingOnBatteries": "false", "AllowHardTerminate": "true", "StartWhenAvailable": "true", "RunOnlyIfNetworkAvailable": "true", "AllowStartOnDemand": "true", "Enabled": "true", "Hidden": "false", "RunOnlyIfIdle": "false", "WakeToRun": "true", "ExecutionTimeLimit": "PT1H", "Priority": "5"}
 		for key, value in expected.items():
 			self.assertEqual(schedule._text(root, "Settings/" + key), value)
 		self.assertEqual([child.tag.rsplit("}", 1)[-1] for child in root], ["RegistrationInfo", "Triggers", "Principals", "Settings", "Actions"])
@@ -246,6 +246,28 @@ class ScheduleWrapperTests(unittest.TestCase):
 			with self.subTest(root=root), patch("rfapp.schedule._read_task", return_value=root), patch("rfapp.schedule._create_task") as create:
 				self.assertTrue(schedule.ensure()["in_sync"])
 				create.assert_called_once()
+				written = ET.fromstring(create.call_args.args[1].split("\n", 1)[1])
+				self.assertEqual(schedule._text(written, "Settings/WakeToRun"), "true")
+
+	def test_ensure_enables_wake_for_existing_task(self):
+		for catch_up in (True, False):
+			for wake in ("false", None):
+				configuration = replace(DEFAULT, catch_up=catch_up)
+				root = tree(configuration)
+				settings = root.find("{" + schedule._NS + "}Settings")
+				flag = settings.find("{" + schedule._NS + "}WakeToRun")
+				if wake is None:
+					settings.remove(flag)
+				else:
+					flag.text = wake
+				with self.subTest(catch_up=catch_up, wake=wake), patch("rfapp.schedule._settings", return_value=configuration), patch("rfapp.schedule._read_task", return_value=root), patch("rfapp.schedule._create_task") as create:
+					self.assertFalse(schedule.status()["in_sync"])
+					self.assertTrue(schedule.ensure()["in_sync"])
+					create.assert_called_once()
+					self.assertEqual(create.call_args.args[0], "RewardsFarmerApp_test0000")
+					written = ET.fromstring(create.call_args.args[1].split("\n", 1)[1])
+					self.assertEqual(schedule._text(written, "Settings/WakeToRun"), "true")
+					self.assertEqual(schedule._text(written, "Settings/StartWhenAvailable"), "true" if catch_up else "false")
 
 	def test_manual_or_no_accounts_removes(self):
 		for s in (replace(DEFAULT, mode="manual"), replace(DEFAULT, active_accounts=0)):

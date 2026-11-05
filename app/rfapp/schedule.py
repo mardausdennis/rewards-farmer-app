@@ -123,7 +123,7 @@ def build_task_xml(s: ScheduleSettings, command: list[str], working_dir: str, us
 	)
 	lines += [f"    <{key}>{value}</{key}>" for key, value in values]
 	lines += ["    <IdleSettings>", "      <StopOnIdleEnd>false</StopOnIdleEnd>", "      <RestartOnIdle>false</RestartOnIdle>", "    </IdleSettings>"]
-	values = (("AllowStartOnDemand", "true"), ("Enabled", "true"), ("Hidden", "false"), ("RunOnlyIfIdle", "false"), ("WakeToRun", "false"), ("ExecutionTimeLimit", f"PT{min(4, max(1, s.active_accounts))}H"), ("Priority", "5"))
+	values = (("AllowStartOnDemand", "true"), ("Enabled", "true"), ("Hidden", "false"), ("RunOnlyIfIdle", "false"), ("WakeToRun", "true"), ("ExecutionTimeLimit", f"PT{min(4, max(1, s.active_accounts))}H"), ("Priority", "5"))
 	lines += [f"    <{key}>{value}</{key}>" for key, value in values]
 	lines += ["  </Settings>", '  <Actions Context="Author">', "    <Exec>", f"      <Command>{escape(command[0])}</Command>", f"      <Arguments>{escape(subprocess.list2cmdline(command[1:]))}</Arguments>", f"      <WorkingDirectory>{escape(working_dir)}</WorkingDirectory>", "    </Exec>", "  </Actions>", "</Task>"]
 	return "\n".join(lines) + "\n"
@@ -218,7 +218,7 @@ def _text(root: ET.Element, path: str) -> str | None:
 
 
 def _in_sync(root, s, command) -> bool:
-	return root is not None and f"config={config_hash(s, command)}" in (_text(root, "RegistrationInfo/Description") or "") and _text(root, "Actions/Exec/Command") == command[0]
+	return root is not None and f"config={config_hash(s, command)}" in (_text(root, "RegistrationInfo/Description") or "") and _text(root, "Actions/Exec/Command") == command[0] and _text(root, "Settings/WakeToRun") == "true"
 
 
 def _settings():
