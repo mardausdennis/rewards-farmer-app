@@ -247,12 +247,16 @@ class TcpSnapshotTests(unittest.TestCase):
 @contextmanager
 def reset_static_requests(owned, marker, always=False):
 	original = harness._Handler.do_GET
-	state = {"requests": 0, "resets": 0}
+	state = {"requests": 0, "resets": 0, "browser_requests": 0, "refetch_requests": 0}
 	def fault(handler):
 		parts = urlsplit(handler.path)
 		if handler.server is owned.server and parts.path == "/img/app-icon.svg" and parts.query == marker:
 			state["requests"] += 1
-			if always or state["resets"] == 0:
+			# Edge can retry a reset before reporting the failed image. The
+			# independent harness refetch explicitly sends Connection: close.
+			refetch = handler.headers.get("Connection", "").lower() == "close"
+			state["refetch_requests" if refetch else "browser_requests"] += 1
+			if always or not refetch:
 				state["resets"] += 1
 				body = (harness.UI_DIR / "img/app-icon.svg").read_bytes()
 				handler.send_response(200)
@@ -292,7 +296,7 @@ class BrowserTransportTests(unittest.TestCase):
 			image.src='./img/app-icon.svg?'+marker;document.querySelector('#view').append(image);
 		""", marker)
 
-	def test_reset_once_is_independently_refetched_and_recorded(self):
+	def test_browser_resets_are_independently_refetched_and_recorded(self):
 		self.owned.open("#/overview", "shell/overview").wait_ready()
 		self.assertEqual([], self.owned.errors())
 		output = io.StringIO()
@@ -300,8 +304,11 @@ class BrowserTransportTests(unittest.TestCase):
 			self.assertEqual("failed", self.fail_image("transport-once"))
 			with redirect_stdout(output):
 				self.assertEqual([], self.owned.errors())
-			self.assertEqual(1, fault["resets"])
-			self.assertEqual(2, fault["requests"])
+			self.assertGreaterEqual(fault["resets"], 1)
+			self.assertEqual(fault["browser_requests"], fault["resets"])
+			self.assertEqual(1, fault["refetch_requests"])
+			self.assertEqual(fault["resets"] + 1, fault["requests"])
+		print("harness_transport_fixture " + json.dumps(fault, sort_keys=True), flush=True)
 		print(output.getvalue(), end="", flush=True)
 		records = [json.loads(line.removeprefix("harness_transport_error ")) for line in output.getvalue().splitlines()]
 		self.assertEqual(1, len(records))
@@ -323,6 +330,9 @@ class BrowserTransportTests(unittest.TestCase):
 			self.assertTrue(errors)
 			self.assertIn("transport-always", errors[0])
 			self.assertGreaterEqual(fault["resets"], 2)
+			self.assertEqual(1, fault["refetch_requests"])
+			self.assertEqual(fault["requests"], fault["resets"])
+		print("harness_transport_fixture " + json.dumps(fault, sort_keys=True), flush=True)
 		print(output.getvalue(), end="", flush=True)
 		record = json.loads(output.getvalue().strip().removeprefix("harness_transport_error "))
 		self.assertIs(False, record["dropped"])
