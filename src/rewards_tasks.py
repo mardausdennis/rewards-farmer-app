@@ -20,6 +20,7 @@ import mimic_typing
 import element_selectors
 import quest_steps
 import run_record
+import page_structure
 
 from constants import DATA_HOME
 
@@ -1005,6 +1006,7 @@ class RewardsTaskUtils:
 			"host": getattr(self, "_balance_last_host", None), "navigation": navigation, "reader_error": reader_error,
 			"wait_mode": "immediate" if immediate else "poll", "budget_remaining_ms": round(self._balance_remaining * 1000),
 			"observation": getattr(elements, "balance_observation", None)}
+		page_structure.capture_once(self.driver, "balance")
 		return None
 
 	def complete_all_tasks(self, *, only=None, clock=time.monotonic, sleep=time.sleep):

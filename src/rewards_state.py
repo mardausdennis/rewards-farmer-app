@@ -23,6 +23,7 @@ from selenium.webdriver.common.by import By
 from element_selectors import ElementNotReady
 import run_record
 import quest_steps
+import page_structure
 
 EARN_URL = "https://rewards.bing.com/earn"
 DAILY_SET_POINTS = 10
@@ -246,7 +247,12 @@ def _require_earn_page(driver, elements, timeout):
 			host, path = _location(driver)
 			if host != "rewards.bing.com" or path.rstrip("/") != "/earn":
 				return None
-			return elements.get_points_breakdown_button()
+			try:
+				return elements.get_points_breakdown_button()
+			except Exception:
+				# A missing breakdown is a missing search source, not proof that
+				# rendered cards/quests/streaks on the earn page are unreadable.
+				return page_structure.snapshot(driver)["rendered"]
 
 		try:
 			_wait_for(ready, timeout)
@@ -263,6 +269,7 @@ def _require_earn_page(driver, elements, timeout):
 		code = "page_blank"
 
 	# Never accept terms or navigate to an activity to get around a redirect.
+	page_structure.capture_once(driver, code)
 	raise _PageStayedBlank(code)
 
 
@@ -373,9 +380,11 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 	try:
 		_require_earn_page(driver, elements, timeout)
 	except _PageStayedBlank as exc:
+		page_structure.capture_once(driver, exc.code)
 		_streak_capture_once(driver, timeout, exc.code, phase=phase)
 		return RewardsState(unreadable=exc.code)
 	except Exception:
+		page_structure.capture_once(driver, "page_blank")
 		_streak_capture_once(driver, timeout, "page_blank", phase=phase)
 		return RewardsState(unreadable="page_blank")
 	_streak_capture_once(driver, timeout, phase=phase)
@@ -388,6 +397,7 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 		balance = _wait_for(lambda: read_balance(driver, elements), timeout)
 	except Exception:
 		unreadable.add("balance")
+		page_structure.capture_once(driver, "balance")
 
 	try:
 		driver.execute_script("arguments[0].click();", elements.get_points_breakdown_button())

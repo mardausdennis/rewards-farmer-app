@@ -30,16 +30,30 @@ const parse = (text, excluded = new Set()) => {
 };
 const headers = [...document.querySelectorAll('header')];
 const host = window.location.hostname;
-const snapshot = {headers: headers.length, buttons: [], header_values: [], inner_size: [window.innerWidth, window.innerHeight], host: ['rewards.bing.com', 'www.bing.com', 'bing.com', 'login.live.com', 'account.microsoft.com'].includes(host) ? host : 'other'};
+const snapshot = {headers: headers.length, buttons: [], structured_buttons: [], header_values: [], inner_size: [window.innerWidth, window.innerHeight], host: ['rewards.bing.com', 'www.bing.com', 'bing.com', 'login.live.com', 'account.microsoft.com'].includes(host) ? host : 'other'};
 for (const header of headers) {
 	const text = header.innerText || '';
 	const labelled = new RegExp('(?:^|\\\\n)\\\\s*(?:available points|points balance)\\\\s*:?\\\\s*(' + arguments[1] + ')(?:\\\\s+points)?\\\\s*(?=\\\\n|$)', 'gi');
 	for (const match of text.matchAll(labelled)) snapshot.header_values.push(parse(match[1]));
 	for (const button of header.querySelectorAll('button')) {
-		if ((button.getAttribute('aria-label') || '').trim().toLowerCase() !== 'view profile') continue;
 		const rect = button.getBoundingClientRect();
 		const style = getComputedStyle(button);
 		const displayed = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && button.getClientRects().length > 0 && !button.closest('[hidden], [aria-hidden="true"]');
+		// F135's observed header: labelled button > span > div > div > p
+		// with an image beside that p. Read only that figure, not a badge/name
+		// elsewhere in the button or the language-dependent accessible label.
+		if ((button.getAttribute('aria-label') || '').trim()) {
+			const figures = [...button.querySelectorAll(':scope > span > div > div')].filter(row => row.querySelector(':scope > img'))
+				.flatMap(row => [...row.querySelectorAll(':scope > p')]).filter(p => {
+					const r = p.getBoundingClientRect(), s = getComputedStyle(p);
+					return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !p.closest('[hidden], [aria-hidden="true"]');
+				});
+			if (figures.length) {
+				const values = figures.map(p => parse(p.innerText || ''));
+				snapshot.structured_buttons.push({displayed, value: values.length === 1 ? values[0] : null});
+			}
+		}
+		if ((button.getAttribute('aria-label') || '').trim().toLowerCase() !== 'view profile') continue;
 		const text = button.innerText || '', content = button.textContent || '';
 		// A numeric level badge is not a balance, even in its own child span.
 		const excluded = new Set([...((text + '\\n' + content).matchAll(/\\blevel\\s*(\\d+)\\b/gi))].map(match => Number(match[1])));
@@ -612,8 +626,8 @@ return (
 	def get_points_balance(self) -> int:
 		"""Available points in the header, not today's earnings in the earn page.
 
-		The observed control is labelled View profile. Its descendants can also
-		carry a name or badge, and WebDriver's text is empty on responsive copies.
+		The observed controls are the structured header figure and View profile.
+		Their descendants can also carry a name or badge, and WebDriver's text is empty on responsive copies.
 		Never take an unlabelled number elsewhere on the page as this balance.
 		"""
 		# One synchronous DOM snapshot avoids serial WebDriver element calls
@@ -626,6 +640,13 @@ return (
 		observation = {"headers": packet["headers"], "profile_buttons": len(packet["buttons"]),
 			"buttons": [], "inner_size": packet["inner_size"], "complete": True}
 		self.balance_observation = observation
+		structured = [button for button in packet.get("structured_buttons", []) if button.get("displayed") is True]
+		if structured:
+			values = {button.get("value") for button in structured}
+			if len(values) == 1 and all(type(value) is int and value >= 0 for value in values):
+				return values.pop()
+			# A present but ambiguous/loading figure must not borrow an old total.
+			raise NoSuchElementException("header points figure is not unambiguous")
 		visible, hidden = [], []
 		for button in packet["buttons"]:
 			observation["buttons"].append({"displayed": button["displayed"],
