@@ -77,7 +77,7 @@ class AccountsTests(unittest.TestCase):
 		 const calls=[],api=window.pywebview.api;
 		 for(const method of ['cancel_signin','confirm_enrollment']){const original=api[method];api[method]=async request=>{calls.push({method,request:structuredClone(request)});return original(request)}}
 		 window.rev1EnrollmentCalls=calls;
-		 document.getElementById('accounts-add-another').click();await wait(()=>document.getElementById('dialog').open);
+		 await addWithoutInvitation();await wait(()=>document.getElementById('dialog').open);
 		 assert(document.getElementById('dialog').textContent.includes('Morgan Synthetic'),'rev1 observed name retained');
 		 assert(!document.querySelector('.accounts-signin')&&!document.getElementById('accounts-confirm-enrollment')&&!document.getElementById('accounts-cancel-enrollment'),'rev1 no duplicate banner or actions behind modal');
 		 assert(s.get('accounts').length===2,'rev1 observation does not register');
@@ -93,7 +93,7 @@ class AccountsTests(unittest.TestCase):
 		 const dialog=document.getElementById('dialog'),closed=new Promise(resolve=>dialog.addEventListener('close',resolve,{once:true}));dialog.querySelector('.button-ghost').click();await closed;
 		 await wait(()=>window.rev1EnrollmentCalls.some(call=>call.method==='cancel_signin')&&!document.getElementById('accounts-add-another').disabled);
 		 assert(s.get('accounts').length===2&&!document.getElementById('accounts-confirm-enrollment')&&!document.getElementById('accounts-cancel-enrollment'),'rev1 explicit Cancel discards pending registration');
-		 document.getElementById('accounts-add-another').click();await wait(()=>document.getElementById('dialog').open);
+		 await addWithoutInvitation();await wait(()=>document.getElementById('dialog').open);
 		 assert(!document.querySelector('.accounts-signin'),'rev1 no duplicate surface on next enrollment');
 		 document.querySelector('#dialog .button-primary').click();await wait(()=>s.get('accounts').length===3&&!document.getElementById('accounts-add-another').disabled);
 		 assert(window.rev1EnrollmentCalls.filter(call=>call.method==='confirm_enrollment').length===1&&s.get('accounts')[2].identity_status==='confirmed','rev1 exactly one explicit confirmation registers');
@@ -105,18 +105,18 @@ class AccountsTests(unittest.TestCase):
 		self.js("""
 		 const api=window.pywebview.api,calls=[];
 		 for(const method of ['add_account','begin_enrollment','confirm_enrollment','cancel_signin']){const original=api[method];api[method]=async request=>{calls.push({method,request:structuredClone(request)});return original(request)}}
-		 document.getElementById('accounts-add-another').click();await wait(()=>document.getElementById('dialog').open);
+		 await addWithoutInvitation();await wait(()=>document.getElementById('dialog').open);
 		 assert(calls[0].method==='begin_enrollment'&&calls[0].request.account_id==='account-1','F108 existing first');
 		 assert(!calls.some(call=>call.method==='add_account'),'F108 no add before enrollment');
 		 const dialog=document.getElementById('dialog');assert(dialog.textContent.includes('Jamie Synthetic')&&dialog.textContent.includes(i.t('accounts.enrollment.same_name_limit')),'F108 observed name and same-name limitation');
 		 dialog.querySelector('.button-primary').click();await wait(()=>s.get('accounts')[0].identity_status==='confirmed'&&!document.getElementById('accounts-add-another').disabled);
 		 const confirmed=calls.find(call=>call.method==='confirm_enrollment').request;
 		 assert(confirmed.account_id==='account-1'&&confirmed.confirmed===true&&confirmed.confirmation_token,'F108 token bound');
-		 document.getElementById('accounts-add-another').click();await wait(()=>dialog.open);
+		 await addWithoutInvitation();await wait(()=>dialog.open);
 		 assert(dialog.textContent.includes('Morgan Synthetic'),'F108 new observed name');
 		 dialog.querySelector('.button-ghost').click();await wait(()=>calls.some(call=>call.method==='cancel_signin')&&!document.getElementById('accounts-add-another').disabled);
 		 assert(s.get('accounts').length===1&&calls.filter(call=>call.method==='confirm_enrollment').length===1,'F108 cancel never registers');
-		 document.getElementById('accounts-add-another').click();await wait(()=>dialog.open);dialog.querySelector('.button-primary').click();
+		 await addWithoutInvitation();await wait(()=>dialog.open);dialog.querySelector('.button-primary').click();
 		 await wait(()=>s.get('accounts').length===2&&!document.getElementById('accounts-add-another').disabled);
 		 assert(s.get('accounts')[1].identity_status==='confirmed','F108 second confirmed');
 		 const router=await import('./js/router.js');router.navigate('#/overview');await wait(()=>document.getElementById('overview-account')?.options.length===3);
@@ -132,7 +132,7 @@ class AccountsTests(unittest.TestCase):
 		 assert(document.querySelector('[data-invited]')&&!document.querySelector('[data-invited] [data-identity]'),'F108 friend note not enrolled');
 		 const api=window.pywebview.api,original=api.add_account,calls=[];
 		 api.add_account=async request=>{calls.push(request);return request.confirm_migration?original(request):{ok:false,error:{code:'accounts.migration_needed',message_key:'errors.app.accounts_migration_needed',params:{},detail:null,fields:null}}};
-		 document.getElementById('accounts-add-another').click();await wait(()=>document.getElementById('dialog').open);
+		 await addWithoutInvitation();await wait(()=>document.getElementById('dialog').open);
 		 assert(document.getElementById('dialog').textContent.includes(i.t('errors.app.accounts_migration_needed')),'F108 migration preview');
 		 document.querySelector('#dialog .button-primary').click();await wait(()=>calls.length===2&&document.getElementById('dialog').open&&document.getElementById('dialog').textContent.includes('Morgan Synthetic'));
 		 assert(!calls[0].confirm_migration&&calls[1].confirm_migration===true,'F108 migration only after choice');
@@ -148,7 +148,7 @@ class AccountsTests(unittest.TestCase):
 		 const r=await import('./js/router.js');r.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));r.navigate('#/accounts');await wait(()=>document.querySelector('[data-identity=unknown]'));
 		 assert(document.querySelector('[data-identity-check=unknown]')&&document.querySelector('[data-identity=unconfirmed]'),'F108 unknown not match and unconfirmed distinct');
 		 api.get_enrollment_status=async()=>({ok:true,data:{account_id:'foreign',state:'awaiting_confirmation',observed_name:'Wrong name',confirmation_token:'wrong',same_name_limit:true}});
-		 document.getElementById('accounts-add-another').click();await wait(()=>document.querySelector('.accounts-screen>.banner'));
+		 await addWithoutInvitation();await wait(()=>document.querySelector('.accounts-screen>.banner'));
 		 assert(!document.getElementById('dialog').open&&s.get('accounts').length===2,'F108 foreign observation not offered');
 		 """)
 
@@ -160,7 +160,7 @@ class AccountsTests(unittest.TestCase):
 				 const api=window.pywebview.api;
 				 if(code==='enrollment_save_failed')api.confirm_enrollment=async()=>({ok:false,error:{code:'accounts.'+code,message_key:'errors.app.accounts_'+code,params:{},detail:null,fields:null}});
 				 else api.add_account=async()=>({ok:false,error:{code:'accounts.'+code,message_key:'errors.app.accounts_'+code,params:{},detail:null,fields:null}});
-				 document.getElementById('accounts-add-another').click();
+				 await addWithoutInvitation();
 				 if(code==='enrollment_save_failed'){await wait(()=>document.getElementById('dialog').open);const d=document.getElementById('dialog'),closed=new Promise(resolve=>d.addEventListener('close',resolve,{once:true}));d.querySelector('.button-primary').click();await closed}
 				 await wait(()=>document.querySelector('.accounts-screen>.banner'));
 				 assert(document.querySelector('.accounts-screen>.banner').textContent.includes(i.t('errors.app.accounts_'+code))&&s.get('accounts').length===2,'F108 failure stays causal without registering');
@@ -170,7 +170,7 @@ class AccountsTests(unittest.TestCase):
 				_harness.viewport(width,height);self.open("multi-account",theme)
 				self.js("assert(document.querySelectorAll('[data-identity]').length===2&&document.querySelectorAll('[data-invited]').length===1,'F108 two real accounts one note');assert(document.documentElement.scrollWidth<=innerWidth+1,'F108 accounts fits')")
 				if os.environ.get('RF_F108_CAPTURE'):_harness.driver.save_screenshot(str(Path(os.environ['RF_F108_CAPTURE'])/f'accounts-{theme}-{width}x{height}.png'))
-				self.js("document.getElementById('accounts-add-another').click();await wait(()=>document.getElementById('dialog').open);assert(document.getElementById('dialog').textContent.includes('Morgan Synthetic'),'F108 observed name shown');assert(!document.querySelector('.accounts-signin'),'rev1 enrollment capture has only one confirmation surface')")
+				self.js("await addWithoutInvitation();await wait(()=>document.getElementById('dialog').open);assert(document.getElementById('dialog').textContent.includes('Morgan Synthetic'),'F108 observed name shown');assert(!document.querySelector('.accounts-signin'),'rev1 enrollment capture has only one confirmation surface')")
 				if os.environ.get('RF_F108_CAPTURE'):_harness.driver.save_screenshot(str(Path(os.environ['RF_F108_CAPTURE'])/f'enrollment-{theme}-{width}x{height}.png'))
 				self.js("document.querySelector('#dialog .button-ghost').click();await wait(()=>!document.getElementById('dialog').open)")
 		_harness.viewport(1280,800)
@@ -241,6 +241,14 @@ class AccountsTests(unittest.TestCase):
 			(async()=>{
 				const assert=(ok,label)=>{if(!ok)throw Error(label)};
 				const wait=async test=>{for(let n=0;n<100;n++){if(test())return;await new Promise(r=>setTimeout(r,10))}throw Error('condition timeout')};
+				const addWithoutInvitation=async()=>{
+					document.getElementById('accounts-add-another').click();
+					await wait(()=>document.getElementById('accounts-invite-normal')||document.getElementById('dialog').open||document.querySelector('.accounts-screen>.banner')||document.getElementById('accounts-confirm-enrollment'));
+					if(document.getElementById('accounts-invite-normal')){
+						assert(document.getElementById('accounts-invite-source')&&document.getElementById('accounts-invite-preview').disabled,'F119 explicit source choice, preview disabled without source');
+						document.getElementById('accounts-invite-normal').click();
+					}
+				};
 				const c=await import('./js/components/index.js');const i=await import('./js/i18n.js');const s=await import('./js/store.js');
 			""" + body + """
 				return {ok:true};
@@ -631,6 +639,38 @@ class AccountsTests(unittest.TestCase):
 		elif fixture in ("recycle-warning", "root-error", "remove-busy"):
 			identity = "%40root" if fixture == "root-error" else "jamie"
 			self.js(f"document.getElementById('accounts-remove-{identity}').click();await wait(()=>document.getElementById('dialog').open);const dialog=document.getElementById('dialog');const closed=new Promise(resolve=>dialog.addEventListener('close',resolve,{{once:true}}));dialog.querySelectorAll('.button-danger')[" + ("0" if fixture == "root-error" else "1") + "].click();await closed;await wait(()=>document.querySelector('#view [role=alert]'));")
+
+	def test_invite_paragraphs_wrap_in_narrow_long_and_rtl_states(self):
+		for lang in ("x-long", "x-rtl"):
+			for theme in ("dark", "light"):
+				with self.subTest(lang=lang, theme=theme):
+					_harness.viewport(860, 600)
+					self.open("invite-onboarding", theme, lang)
+					self.js("""
+					 const measurements=[],fits=stage=>{
+					  const paragraphs=[...document.querySelectorAll('.accounts-editor > p,.accounts-signin > p')];
+					  assert(paragraphs.length>=2,'recovery and limitation paragraphs exist');
+					  assert(paragraphs.every(p=>getComputedStyle(p).overflowWrap==='anywhere'&&p.scrollWidth<=p.clientWidth),'all invite paragraphs wrap within their containers');
+					  assert(document.documentElement.scrollWidth<=document.documentElement.clientWidth&&view.scrollWidth<=view.clientWidth,'narrow long and RTL layout stays within client width');
+					  measurements.push({stage,view:{scroll:view.scrollWidth,client:view.clientWidth},paragraphs:paragraphs.map(p=>({scroll:p.scrollWidth,client:p.clientWidth}))});
+					 };
+					 fits('recovery');
+					 const api=window.pywebview.api,confirmed=s.get('accounts').map(account=>({...account,identity_status:'confirmed'}));
+					 api.list_accounts=async()=>({ok:true,data:{accounts:confirmed}});
+					 const router=await import('./js/router.js');router.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));
+					 router.navigate('#/accounts');await wait(()=>document.querySelectorAll('[data-identity=confirmed]').length===confirmed.length);
+					 document.getElementById('accounts-add-another').click();await wait(()=>document.getElementById('accounts-invite-source'));
+					 fits('choice');
+					 const source=document.getElementById('accounts-invite-source');assert(source.options.length>1,'fixture offers an existing source account');source.value=source.options[1].value;source.dispatchEvent(new Event('change',{bubbles:true}));
+					 await wait(()=>!document.getElementById('accounts-invite-preview').disabled);document.getElementById('accounts-invite-preview').click();
+					 await wait(()=>document.getElementById('accounts-invite-link'));fits('preview');
+					 document.getElementById('accounts-invite-open').click();await wait(()=>document.querySelector('[data-signin-state=invite_waiting]')&&document.getElementById('accounts-invite-continue'));
+					 assert(document.querySelector('.accounts-signin > p'),'waiting panel limitation uses the same wrapping class');fits('waiting');
+					 window.inviteParagraphMeasurements=measurements;
+					""")
+					print(json.dumps({"lang": lang, "theme": theme, "width": 860, "measurements": _harness.driver.execute_script("return window.inviteParagraphMeasurements")}), flush=True)
+					self.assertEqual([], _harness.errors())
+		_harness.viewport(1280, 800)
 
 	def test_z_fixture_matrix_keyboard_and_screenshots(self):
 		for width, height in ((1280, 800), (860, 600)):

@@ -27,6 +27,7 @@
 .accounts-referral-figures dd { margin-inline-start: 0; font-size: var(--fs-4); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
 .accounts-help { padding-block: var(--sp-3); font-size: var(--fs-2); }
 .accounts-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); padding: var(--sp-4); margin-block-end: var(--sp-4); background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-s); }
+.accounts-editor > p, .accounts-signin > p { overflow-wrap: anywhere; }
 .accounts-editor .field { max-inline-size: 440px; }
 .accounts-signin { display: grid; gap: var(--sp-3); }
 .accounts-signin > .button { justify-self: start; }
