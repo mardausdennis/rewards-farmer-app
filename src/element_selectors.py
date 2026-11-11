@@ -276,7 +276,7 @@ class ElementSelectionUtils:
 	def _streak_tile(self, title):
 		buttons = self._streak_buttons()
 		for button, lines in buttons:
-			if any(line.casefold() == self._visual_label(title).casefold() for line in lines):
+			if any(self._visual_label(title).casefold() in line.casefold() for line in lines):
 				return button
 		if not any(lines for _, lines in buttons):
 			raise ElementNotReady("streaks row has not finished rendering its tile text")
@@ -570,7 +570,7 @@ class ElementSelectionUtils:
 
 		for label in (Labels.VISUAL_SEARCH_NOW, Labels.VISUAL_SEARCH_ACTIVATE):
 			for link in sidebar.find_elements(By.TAG_NAME, "a"):
-				if (link.is_displayed() and self._visual_label(link.text).casefold() == label
+				if (link.is_displayed() and label in self._visual_label(link.text).casefold()
 					and link.get_dom_attribute("aria-disabled") != "true"):
 					return link
 		raise NoSuchElementException("visual search panel has no Search now or Activate streak link")
@@ -782,13 +782,14 @@ return (
 		return self._button_containing(Labels.READY_TO_CLAIM)
 
 	def get_claim_bonus_points_button(self):
-		return self._sidebar_control((Labels.CLAIM, "claim bonus points"))
+		return self._sidebar_control((Labels.CLAIM,))
 
 	def get_generic_sidebar_close_button(self):
 		return self._sidebar_control(("close", "dismiss"), close=True)
 
 	def _sidebar_control(self, labels, *, close=False):
 		seen = []
+		fallback = None
 		for button in self.get_sidebar_section().find_elements(By.TAG_NAME, "button"):
 			try:
 				if not button.is_displayed():
@@ -799,11 +800,17 @@ return (
 					continue
 				if close and any("account" in value.casefold() for value in values):
 					continue
+				if not close and any(Labels.READY_TO_CLAIM in value.casefold() for value in values):
+					continue
 				if (any(re.search(r"\b(?:close|dismiss)\b", value, re.I) for value in values) if close
 					else any(value.casefold() in labels for value in values)):
 					return button
+				if not close and fallback is None and any(Labels.CLAIM in value.casefold() for value in values):
+					fallback = button
 			except StaleElementReferenceException:
 				continue
+		if fallback is not None:
+			return fallback
 		raise NoSuchElementException("sidebar has no " + "/".join(labels) + " control; shown labels: " + ", ".join(dict.fromkeys(seen)))
 
 	# ------------------------------------------------------------------

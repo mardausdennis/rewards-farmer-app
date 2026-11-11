@@ -200,14 +200,14 @@ class VisualIdentityTests(unittest.TestCase):
 		self.assertEqual(h.upload_calls, 1)
 		self.assertEqual(len(reads), 2)
 
-	def test_tile_title_scope_is_exact_normalized_and_order_independent(self):
+	def test_tile_title_scope_is_normalized_substring_and_order_independent(self):
 		h = Harness()
 		section = h.driver.children[(By.ID, "streaks")][0]
 		section.children[(By.TAG_NAME, "button")].reverse()
 		visual = h.tiles[-1]
-		visual.text = "  VISUAL  Search\tStreak  \nActivity: 0/1"
+		visual.text = "Start  VISUAL  Search\tStreak today\nActivity: 0/1"
 		self.assertIs(h.tasks.elements.get_open_visual_search_sidebar(), visual)
-		section.children[(By.TAG_NAME, "button")] = [tile("Not Visual Search Streak")]
+		section.children[(By.TAG_NAME, "button")] = [tile("Bing App Streak")]
 		h.driver.children[(By.TAG_NAME, "button")] = [tile("Visual Search Streak")]
 		with self.assertRaises(element_selectors.VisualSearchUnavailable):
 			h.tasks.elements.get_open_visual_search_sidebar()
