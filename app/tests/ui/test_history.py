@@ -160,6 +160,24 @@ class HistorySourceTests(unittest.TestCase):
 
 @unittest.skipUnless(_enabled,"Run through guarded parent UI overlay")
 class HistoryTests(unittest.TestCase):
+	def test_edge_browsing_per_account_outcomes_unknown_and_null(self):
+		_harness.open('#/history/synthetic-multi-identity', 'edge/results').wait_ready()
+		self.js("""
+		 await wait(()=>document.querySelector('.edge-browsing-result'));
+		 const number=value=>value===null?i.t('common.value.unknown'):i.formatNumber(value),expected=value=>i.t('common.edge_browsing.result',{before:number(value.minutes_before),after:number(value.minutes_after),target:number(value.minutes_target),outcome:i.t('common.edge_browsing.outcome.'+value.outcome)});
+		 const api=window.pywebview.api,original=api.get_run,base=await original({run_id:'synthetic-multi-identity'}),receipt=base.data.accounts[0].edge_browsing;
+		 assert(document.querySelectorAll('.edge-browsing-result').length===1&&document.querySelector('[data-edge-account=account-1]').textContent===expected(receipt),'Edge History reads projected receipt only for owning account');
+		 for(const outcome of ['complete','incomplete','not_available','stopped','error']){
+		  const value={...receipt,outcome,minutes_before:outcome==='not_available'?null:0,minutes_after:outcome==='error'?null:12,minutes_target:outcome==='error'?null:30};
+		  api.get_run=async()=>{const response=structuredClone(base);response.data.accounts[0].edge_browsing=null;response.data.accounts[1].edge_browsing=value;return response};
+		  document.querySelector('.history-screen>.screen-header button').click();await wait(()=>document.querySelector('[data-edge-account=account-2]')?.dataset.edgeOutcome===outcome);
+		  const line=document.querySelector('.edge-browsing-result');assert(line.textContent===expected(value)&&document.querySelectorAll('.edge-browsing-result').length===1,'Edge History outcome/unknown numbers not inferred or borrowed');
+		 }
+		 api.get_run=async()=>{const response=structuredClone(base);response.data.accounts.forEach(account=>{account.edge_browsing=null});return response};document.querySelector('.history-screen>.screen-header button').click();await wait(()=>document.querySelector('[data-run-id=synthetic-multi-identity]')&&!document.querySelector('.edge-browsing-result'));
+		 assert(document.querySelector('.history-run-points'),'Edge missing receipt hides line without hiding run');
+		 """)
+		self.assertEqual([], _harness.errors())
+
 	def test_f108_scoped_identity_outcomes_and_single_pin(self):
 		self.open();self.js("assert(!document.getElementById('history-account'),'F108 single selector absent')")
 		_harness.open('#/history/synthetic-multi-identity','accounts/multi-account').wait_ready()

@@ -90,6 +90,43 @@ class SettingsSourceTests(unittest.TestCase):
 
 @unittest.skipUnless(_enabled, "Set REWARDS_APP_UI_TESTS=1 for isolated loopback Settings tests")
 class SettingsTests(unittest.TestCase):
+	def test_edge_streak_failed_save_keeps_reminder_and_auto_off(self):
+		_harness.open('#/settings/run', 'edge/streak').wait_ready()
+		self.js("""
+		 await wait(()=>document.getElementById('setting-run-edge-streak'));
+		 const before=structuredClone(s.get('settings')),api=window.pywebview.api,original=api.save_settings;
+		 api.save_settings=async()=>({ok:false,error:{code:'settings.invalid',message_key:'errors.app.settings_invalid',params:{},detail:null,fields:{}}});
+		 document.querySelector('#setting-run-edge-streak [data-value=fill]').click();document.getElementById('settings-save').click();
+		 await wait(()=>!document.querySelector('.settings-form').disabled&&[...document.querySelectorAll('.banner-message')].some(node=>node.textContent===i.t('errors.app.settings_invalid')));
+		 assert(s.get('settings').values['run.edge_streak']==='remind'&&JSON.stringify(s.get('settings').edge_streak.auto_off)===JSON.stringify(before.edge_streak.auto_off),'Edge failed save cannot clear stored automatic stop');
+		 assert([...document.querySelectorAll('.banner-message')].some(node=>node.textContent===i.t('settings.run.edge_streak.auto_off')),'Edge notice survives save failure');
+		 document.getElementById('settings-cancel').click();assert(document.querySelector('#setting-run-edge-streak [aria-checked=true]').dataset.value==='remind','Edge Cancel restores effective reminder');
+		 api.save_settings=original;
+		 """)
+		self.assertEqual([], _harness.errors())
+
+	def test_edge_streak_load_save_auto_off_and_explicit_fill(self):
+		_harness.open('#/settings/run', 'edge/streak').wait_ready()
+		self.js("""
+		 await wait(()=>document.getElementById('setting-run-edge-streak'));
+		 const group=()=>document.getElementById('setting-run-edge-streak'),selected=()=>group().querySelector('[aria-checked=true]').dataset.value;
+		 assert(selected()==='remind'&&group().querySelectorAll('[role=radio]').length===3,'Edge three-way control loads effective Remind');
+		 assert(document.getElementById('settings-save').disabled,'Edge load does not mark dirty');
+		 const help=document.getElementById('setting-run-edge-streak-help');assert(help.textContent===i.t('settings.run.edge_streak.help')&&group().querySelector('[role=radiogroup]').getAttribute('aria-describedby')===help.id,'Edge exact accessible help');
+		 const auto=()=>[...document.querySelectorAll('.banner-message')].find(node=>node.textContent===i.t('settings.run.edge_streak.auto_off'));
+		 assert(auto(),'Edge persistent auto-off notice');
+		 const calls=[],original=window.pywebview.api.save_settings;window.pywebview.api.save_settings=async request=>{calls.push(structuredClone(request));return original(request)};
+		 group().querySelector('[data-value=fill]').click();assert(auto()&&!document.getElementById('settings-save').disabled,'Edge unsaved Fill does not clear notice');
+		 document.getElementById('settings-cancel').click();assert(selected()==='remind'&&auto()&&calls.length===0,'Edge cancel preserves backend auto-off');
+		 const submit=async()=>{const before=s.get('settings');document.getElementById('settings-save').click();await wait(()=>s.get('settings')!==before&&!document.querySelector('.settings-form').disabled)};
+		 group().querySelector('[data-value=off]').click();await submit();assert(selected()==='off'&&auto(),'Edge Off saved without clearing prior auto-off');
+		 group().querySelector('[data-value=fill]').click();await submit();assert(selected()==='fill'&&!auto()&&s.get('settings').edge_streak.auto_off===null,'Edge explicit saved Fill clears backend auto-off');
+		 assert(JSON.stringify(calls)===JSON.stringify([{changes:{'run.edge_streak':'off'}},{changes:{'run.edge_streak':'fill'}}]),'Edge uses existing partial-save path only');
+		 await r.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));await r.navigate('#/settings/run');await wait(()=>group());assert(selected()==='fill'&&!auto(),'Edge choice persists through load');
+		 group().querySelector('[data-value=remind]').click();await submit();assert(selected()==='remind','Edge Remind saves');
+		 """)
+		self.assertEqual([], _harness.errors())
+
 	def r4_css(self, rules):
 		_harness.driver.execute_cdp_cmd("DOM.enable", {})
 		_harness.driver.execute_cdp_cmd("CSS.enable", {})

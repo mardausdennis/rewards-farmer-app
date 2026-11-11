@@ -107,6 +107,25 @@ class OverviewSourceTests(unittest.TestCase):
 
 @unittest.skipUnless(_enabled, "Set REWARDS_APP_UI_TESTS=1 for guarded mock UI acceptance")
 class OverviewTests(unittest.TestCase):
+	def test_edge_streak_today_minutes_absent_unknown_and_account_scope(self):
+		_harness.open('#/overview','edge/streak').wait_ready()
+		self.js("""
+		 const number=value=>Number.isFinite(value)?i.formatNumber(value):i.t('common.value.unknown');
+		 const base=structuredClone(s.get('overview')),capture=base.edge_streak.accounts[0],account=base.accounts[0];
+		 const expected=(minutes,target)=>i.t('overview.edge_streak.minutes',{minutes:number(minutes),target:number(target)});
+		 assert(document.querySelector('.overview-edge-streak').textContent===expected(12,30),'Edge today minutes shown');
+		 for(const tile of [false,null]){const next=structuredClone(base);next.edge_streak.accounts[0].edge_tile=tile;s.set('overview',next);assert(!document.querySelector('.overview-edge-streak'),'Edge absent or unknown tile hidden')}
+		 for(const [minutes,target] of [[0,30],[null,30],[12,null]]){const next=structuredClone(base);Object.assign(next.edge_streak.accounts[0],{edge_minutes:minutes,edge_target:target});s.set('overview',next);assert(document.querySelector('.overview-edge-streak').textContent===expected(minutes,target),'Edge null never zero and zero retained')}
+		 const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);const stale=structuredClone(base);stale.edge_streak.accounts[0].at=yesterday.toISOString();s.set('overview',stale);assert(!document.querySelector('.overview-edge-streak'),'Edge previous day not today');
+		 const foreign=structuredClone(base);foreign.edge_streak.accounts[0].account_id='other';s.set('overview',foreign);assert(!document.querySelector('.overview-edge-streak'),'Edge no cross-account capture');
+		 const multi=structuredClone(base);multi.accounts.push({...structuredClone(account),account_id:'other',label:'Other synthetic'});multi.streaks=null;multi.streaks_by_account={};multi.edge_streak.accounts.push({...structuredClone(capture),account_id:'other',edge_minutes:5});
+		 s.set('accounts',multi.accounts.map(item=>({id:item.account_id,label:item.label,paused:item.paused})));s.set('overview',multi);
+		 const router=await import('./js/router.js'),wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,10))}throw Error('Edge Overview scope timeout')};
+		 await router.navigate('#/history');await wait(()=>document.querySelector('.history-screen'));await router.navigate('#/overview');await wait(()=>document.querySelector('[data-edge-account=other]'));
+		 assert(document.querySelectorAll('.overview-edge-streak').length===2&&document.querySelector('[data-edge-account=other]').textContent===expected(5,30),'Edge aggregate keeps per-account minutes');
+		 """)
+		self.assertEqual([], _harness.errors())
+
 	def test_f108_selector_streaks_and_single_pin(self):
 		_harness.open('#/overview','overview/ready').wait_ready()
 		self.js("assert(!document.getElementById('overview-account')&&document.querySelector('[data-region=tasks]')&&document.querySelector('.overview-balance')&&document.getElementById('overview-run-now'),'F108 single structure pinned')")

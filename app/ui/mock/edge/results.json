@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "note": "Synthetic account-local Edge browsing receipts in run details, live progress, history rows and pushes. The mock bridge composes existing multi-account run envelopes with exactly the E4b projection.",
+  "scenario": "multi-account",
+  "edge_results": {
+    "account-1": {"minutes_before": 4, "minutes_after": 12, "minutes_target": 30, "activated": true, "maximum_reached": false, "final_read_success": true, "outcome": "incomplete", "duration_ms": 480000},
+    "account-2": null
+  },
+  "methods": {},
+  "pushes": []
+}

@@ -19,6 +19,7 @@ export function mount(view, ctx) {
     let secretsSet = {};
     const secretEdits = new Map();
     let schedule = null;
+    let edgeStreak = null;
     let saving = false;
     let generation = 0;
     let legacyDismissed = false;
@@ -212,6 +213,13 @@ export function mount(view, ctx) {
         const browserRow = row("run.browser_mode", browserControl);
         browserRow.append(browserHelp);
         const content = el("div", { class: "settings-rows" }, [browserRow]);
+        const edgeHelp = el("p", { class: "field-description", id: `${fieldId("run.edge_streak")}-help`, text: t("settings.run.edge_streak.help") });
+        const edgeControl = c.segmented.create({ id: fieldId("run.edge_streak"), labelKey: "settings.run.edge_streak.label", value: values["run.edge_streak"] ?? "off", options: choices("settings.run.edge_streak", ["off", "remind", "fill"]), onChange: value => setValue("run.edge_streak", value) });
+        edgeControl.querySelector('[role="radiogroup"]').setAttribute("aria-describedby", edgeHelp.id);
+        const edgeRow = row("run.edge_streak", edgeControl);
+        edgeRow.append(edgeHelp);
+        content.append(edgeRow);
+        if (edgeStreak?.auto_off) content.append(c.banner.create({ tone: "warning", messageKey: "settings.run.edge_streak.auto_off" }));
         const taskSwitches = el("fieldset", { class: "settings-task-options" }, [el("legend", { class: "field-label", text: t("settings.run.tasks.label") })]);
         for (const task of store.get("appInfo").task_ids) taskSwitches.append(c.switchControl.create({ id: `setting-task-${task}`, labelKey: `common.task.${task}`, checked: !values["run.tasks_off"].includes(task), onChange: enabled => setValue("run.tasks_off", enabled ? values["run.tasks_off"].filter(value => value !== task) : [...values["run.tasks_off"], task]) }));
         content.append(row("run.tasks_off", taskSwitches), row("run.search_source", c.select.create({ id: fieldId("run.search_source"), labelKey: "settings.run.source.label", value: values["run.search_source"], options: choices("settings.run.source", ["trends", "ollama", "openrouter"]), onChange: value => setValue("run.search_source", value, true) })));
@@ -277,6 +285,7 @@ export function mount(view, ctx) {
             secretsSet = { ...data.secrets_set };
             secretEdits.clear();
             schedule = data.schedule;
+            edgeStreak = data.edge_streak ?? null;
             fieldErrors = {};
             noticeProps = [];
             store.set("settings", data);
@@ -303,6 +312,7 @@ export function mount(view, ctx) {
             secretsSet = { ...data.secrets_set };
             secretEdits.clear();
             schedule = data.schedule;
+            edgeStreak = data.edge_streak ?? null;
             fieldErrors = {};
             noticeProps = [{ tone: "success", messageKey: "settings.saved" }, ...data.warnings.map(warning => ({ tone: "warning", messageKey: warning.message_key, params: warning.params }))];
             // The shell owns language reload after a successful save.

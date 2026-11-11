@@ -1,4 +1,5 @@
 import { el, svg } from "../dom.js";
+import { edgeBrowsingLine } from "../edge-browsing.js";
 import { TASK_ICONS, localDay, groupDays, needsAttention, taskShares, taskGroups, bandLabelFits } from "./history-points.js";
 
 export function mount(view, ctx) {
@@ -270,6 +271,8 @@ export function mount(view, ctx) {
         }
         for (const account of detail.accounts) {
             const body = el("div");
+            const edge = edgeBrowsingLine(i18n, account);
+            if (edge) body.append(edge);
             if (checkOnly && account.decision) body.append(el("p", { class: "muted history-decision", text: t(account.decision.reason_key, { points: account.decision.open_points, min_points: formatNumber(account.decision.min_points ?? 0) }) }));
             if (account.error && detail.result !== "failed" && !["identity_mismatch", "identity_unknown", "enrollment_required"].includes(account.error.code?.replace(/^accounts\./, ""))) body.append(c.banner.create({ tone: "error", messageKey: account.error.message_key, params: { account: account.label } }));
             const unreadable = stateNotice(account);

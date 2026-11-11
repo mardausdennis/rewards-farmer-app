@@ -90,6 +90,26 @@ class LiveSourceTests(unittest.TestCase):
 
 @unittest.skipUnless(_enabled, "Set REWARDS_APP_UI_TESTS=1 for guarded mock UI acceptance")
 class LiveTests(unittest.TestCase):
+	def test_edge_browsing_progress_snapshots_and_finished_receipts(self):
+		_harness.open('#/live', 'edge/results').wait_ready()
+		self.js("""
+		 const wait=async fn=>{for(let n=0;n<200;n++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,10))}throw Error('Edge Live timeout')};
+		 await wait(()=>document.querySelector('.edge-browsing-result'));
+		 const base=structuredClone(s.get('live').run),receipt=base.accounts[0].edge_browsing;
+		 const number=value=>value===null?i.t('common.value.unknown'):i.formatNumber(value),expected=value=>i.t('common.edge_browsing.result',{before:number(value.minutes_before),after:number(value.minutes_after),target:number(value.minutes_target),outcome:i.t('common.edge_browsing.outcome.'+value.outcome)});
+		 assert(base.active&&document.querySelectorAll('.edge-browsing-result').length===1&&document.querySelector('[data-edge-account=account-1]').textContent===expected(receipt),'Edge Live initial projected account line');
+		 for(const outcome of ['complete','incomplete','not_available','stopped','error']){
+		  const next=structuredClone(base),value={...receipt,outcome,minutes_before:outcome==='not_available'?null:0,minutes_after:outcome==='error'?null:12,minutes_target:outcome==='error'?null:30};
+		  next.accounts[0].edge_browsing=null;next.accounts[1].edge_browsing=value;window.rf.receive([{topic:'run.snapshot',data:next}]);
+		  assert(document.querySelector('[data-edge-account=account-2]').textContent===expected(value)&&!document.querySelector('[data-edge-account=account-1]'),'Edge Live snapshot account scope, outcome and unknown readings');
+		 }
+		 const absent=structuredClone(base);absent.accounts.forEach(account=>{account.edge_browsing=null});window.rf.receive([{topic:'run.started',data:absent}]);assert(!document.querySelector('.edge-browsing-result'),'Edge no or malformed event hides line');
+		 const final=structuredClone(base);Object.assign(final,{active:false,ended_at:'2026-11-11T21:00:00Z',result:'ok',result_key:'errors.run.ok'});final.accounts[0].edge_browsing={...receipt,outcome:'complete',minutes_after:30};
+		 window.pywebview.api.get_run=async()=>({ok:true,data:final});window.rf.receive([{topic:'run.finished',data:final}]);await wait(()=>s.get('live').run?.active===false);
+		 assert(document.querySelector('[data-edge-account=account-1]').textContent===expected(final.accounts[0].edge_browsing),'Edge finished receipt retained in Live detail');
+		 """)
+		self.assertEqual([], _harness.errors())
+
 	def setUp(self):
 		_harness.viewport(1280, 800)
 

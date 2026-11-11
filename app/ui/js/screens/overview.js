@@ -200,6 +200,13 @@ export function mount(view, ctx) {
         card.setAttribute("aria-labelledby", heading.id);
         return card;
     }
+    function edgeMinutes(overview, accountId) {
+        const capture = overview.edge_streak?.accounts?.find((item) => item.account_id === accountId);
+        if (capture?.edge_tile !== true || !capture.at) return null;
+        const at = new Date(capture.at), now = new Date();
+        if (!Number.isFinite(at.getTime()) || at.getFullYear() !== now.getFullYear() || at.getMonth() !== now.getMonth() || at.getDate() !== now.getDate()) return null;
+        return el("p", { class: "subtle overview-edge-streak", "data-edge-account": accountId, text: t("overview.edge_streak.minutes", { minutes: number(capture.edge_minutes), target: number(capture.edge_target) }) });
+    }
     function render() {
         if (!active) return;
         const focusedId = view.contains(document.activeElement) ? document.activeElement.id : null;
@@ -235,6 +242,8 @@ export function mount(view, ctx) {
             const summaries = el("div", { class: "overview-account-summaries" });
             for (const item of accounts) {
                 const section = el("section", { class: "overview-account-summary", "data-overview-account": item.account_id }, [el("h2", {}, el("bdi", { text: item.label })), c.stat.create({ labelKey: "overview.balance", value: number(item.state?.balance) })]);
+                const edge = edgeMinutes(overview, item.account_id);
+                if (edge) section.append(edge);
                 const notice = stateNotice(item);
                 if (notice) section.append(notice);
                 const streaks = streaksRegion(overview.streaks_by_account?.[item.account_id], `-${encodeURIComponent(item.account_id)}`);
@@ -292,6 +301,8 @@ export function mount(view, ctx) {
         summary.classList.add("overview-summary");
         summary.dataset.region = "summary";
         root.append(el("div", { class: `overview-spread${todayKnown ? "" : " is-known-only"}` }, [plan, summary]));
+        const edge = edgeMinutes(overview, account.account_id);
+        if (edge) root.append(edge);
         const streaks = todayKnown ? streaksRegion(overview.streaks_by_account ? overview.streaks_by_account[account.account_id] : overview.streaks) : null;
         if (streaks) root.append(streaks);
         const choice = c.segmented.create({ id: "overview-chart-mode", labelKey: "overview.chart.mode", value: chartMode, options: [{ value: "balance", labelKey: "common.chart.balance" }, { value: "earned", labelKey: "common.chart.earned" }], onChange: (value) => { chartMode = value; chartNode = c.pointsChart.update(chartNode, { series: account.chart, mode: chartMode }); } });

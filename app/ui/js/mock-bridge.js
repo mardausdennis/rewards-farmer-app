@@ -36,12 +36,15 @@ export async function install() {
     const [defaults, chosen] = await Promise.all([load("shell/defaults.json"), load(`${fixture}.json`)]);
     const multi = ["multi-account", "multi-account-unconfirmed"].includes(chosen.scenario);
     const multiSeed = multi ? await load("accounts/multi-account.json") : null;
+    const edgeSeed = chosen.edge_streak ? await load("settings/automatic.json") : null;
     const methods = {
         get_invited_friends: { ok: true, data: { invited_friends: [] } },
         get_referral_info: { ok: true, data: { link: null, link_found: false, referrals: null, friends: null, read_at: null, unreadable: "not_read" } },
         list_invite_operations: { ok: true, data: { operations: [] } },
-        ...defaults.methods, ...(multiSeed?.methods || {}), ...chosen.methods,
+        ...defaults.methods, ...(multiSeed?.methods || {}), ...(edgeSeed?.methods || {}), ...chosen.methods,
     };
+    let edgeState = chosen.edge_streak ? structuredClone(chosen.edge_streak) : null;
+    if (edgeState) for (const account of edgeState.accounts) account.at = new Date().toISOString();
     const timers = new Set();
     let invitedFriends = resolveEnvelope("get_invited_friends", methods.get_invited_friends, {}).data?.invited_friends || [];
     let mockAccounts = multi ? structuredClone(methods.list_accounts.data.accounts) : null;
@@ -105,9 +108,32 @@ export async function install() {
         return response;
     }
     let pushesStarted = false;
+    function projectEdgeRun(run) {
+        if (run?.accounts) for (const account of run.accounts) account.edge_browsing = structuredClone(chosen.edge_results && Object.hasOwn(chosen.edge_results, account.account_id) ? chosen.edge_results[account.account_id] : account.edge_browsing ?? null);
+        return run;
+    }
     const api = Object.fromEntries(methodNames.map((method) => [method, async (request = {}) => {
         let response = resolveEnvelope(method, methods[method], request);
         if (multi) response = multiResponse(method, request, response);
+        if (chosen.edge_results && method === "get_live") response = { ok: true, data: { run: { ...scopedRun(null), active: true, ended_at: null, result: null, result_key: null }, log: null } };
+        if (response.ok) {
+            if (method === "get_run") projectEdgeRun(response.data);
+            if (method === "get_live") projectEdgeRun(response.data.run);
+            if (method === "get_history") response.data.runs.forEach(projectEdgeRun);
+        }
+        if (edgeState && response.ok && ["get_settings", "get_overview"].includes(method)) {
+            response.data.edge_streak = structuredClone(edgeState);
+            if (method === "get_settings") response.data.values["run.edge_streak"] = edgeState.mode;
+        }
+        if (edgeState && method === "save_settings") {
+            const current = resolveEnvelope("get_settings", methods.get_settings, {});
+            const mode = request.changes?.["run.edge_streak"];
+            if (mode !== undefined && !["off", "remind", "fill"].includes(mode)) response = failure(method);
+            else if (current.ok) {
+                if (mode) { edgeState.mode = mode; if (mode === "fill") edgeState.auto_off = null; }
+                response = { ok: true, data: { ...current.data, values: { ...current.data.values, ...request.changes, "run.edge_streak": edgeState.mode }, warnings: [], edge_streak: structuredClone(edgeState) } };
+            }
+        }
         if (method === "get_invited_friends" && response.ok) response.data.invited_friends = structuredClone(invitedFriends);
         if (method === "save_invited_friend" && response.ok) {
             const valid = typeof request.name === "string" && request.name.trim().length >= 1 && request.name.trim().length <= 40 &&
@@ -153,14 +179,16 @@ export async function install() {
             for (const push of chosen.pushes || []) {
                 const timer = setTimeout(() => {
                     timers.delete(timer);
-                    window.rf?.receive([{ topic: push.topic, data: structuredClone(push.data) }]);
+                    const data = structuredClone(push.data);
+                    if (["run.started", "run.snapshot", "run.finished"].includes(push.topic)) projectEdgeRun(data);
+                    window.rf?.receive([{ topic: push.topic, data }]);
                 }, Math.max(0, push.after_ms));
                 timers.add(timer);
             }
         }
         if (method === "save_settings" && response.ok && request.changes) {
             const current = resolveEnvelope("get_settings", methods.get_settings, {});
-            if (current.ok) methods.get_settings = { ok: true, data: { ...current.data, values: structuredClone(response.data.values), schedule: structuredClone(response.data.schedule), secrets_set: structuredClone(response.data.secrets_set || {}) } };
+            if (current.ok) methods.get_settings = { ok: true, data: { ...current.data, values: structuredClone(response.data.values), schedule: structuredClone(response.data.schedule), secrets_set: structuredClone(response.data.secrets_set || {}), ...(response.data.edge_streak ? { edge_streak: structuredClone(response.data.edge_streak) } : {}) } };
         }
         return response;
     }]));

@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "note": "Synthetic Edge browsing policy and per-account readings. The mock bridge composes the current Settings and Overview shapes; no real browser work is enabled.",
+  "edge_streak": {
+    "mode": "remind",
+    "auto_off": {"account_id": "jamie", "dates": ["2026-11-10", "2026-11-11"], "run_ids": ["synthetic-edge-first", "synthetic-edge-second"], "at": "2026-11-11T20:00:00Z", "reason": "minutes_not_counted"},
+    "accounts": [
+      {"account_id": "jamie", "edge_tile": true, "edge_minutes": 12, "edge_target": 30, "at": "2026-11-11T20:00:00Z", "run_id": "synthetic-edge-current", "last_scheduled_at": "2026-11-11T20:00:00Z", "last_scheduled_run_id": "synthetic-edge-current"}
+    ]
+  },
+  "methods": {},
+  "pushes": []
+}

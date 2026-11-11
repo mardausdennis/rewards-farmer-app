@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { edgeBrowsingLine } from "../edge-browsing.js";
 
 export function mount(view, ctx) {
     const { bridge, i18n, store, router, components: c } = ctx;
@@ -85,6 +86,8 @@ export function mount(view, ctx) {
             run.accounts.length > 1 && Number.isFinite(account.points_earned) ? el("p", { class: "live-account-points tabular", text: t("common.points.earned", { count: account.points_earned }) }) : null,
         ]);
         const children = [head];
+        const edge = edgeBrowsingLine(i18n, account);
+        if (edge) children.push(edge);
         if (!foldDiagnostics) {
             children.push(checkOnly ? decisionNotice(account) : null, errorNotice(account), stateNotice(state, account));
         }
