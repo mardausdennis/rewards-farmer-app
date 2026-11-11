@@ -74,6 +74,11 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 	invoked_at, invoked_clock = datetime.now().astimezone(), time.monotonic()
 	age = edge_streak.process_age()
 	invoked_clock -= age if age is not None else edge_streak.HARD_STOP_SECONDS
+	return _supervise(kind, accounts, invoked_at, invoked_clock)
+
+
+def _supervise(kind, accounts, invoked_at, invoked_clock):
+	from rfapp import settings, edge_streak
 	if kind not in ("scheduled", "run_now", "check_now"):
 		raise ValueError("Unknown supervisor kind")
 	s = settings.load()
@@ -93,6 +98,17 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 	if kind == "scheduled" and run_lock.status(directory=str(settings.user_data_dir())) is not None:
 		logger.info("Scheduled check skipped because browser profiles are in use")
 		return 3
+	selected = accounts or active_accounts
+	slot = edge_streak.last_slot(s, invoked_at) if kind == "scheduled" else None
+	if slot is not None and s.get("run.edge_streak") == "fill" and len(selected) > 1 and "@root" not in selected:
+		known = edge_streak.open_accounts(selected, slot, user_data_dir=settings.user_data_dir())
+		if known and not set(selected) <= known:
+			# A child environment applies to every account in that child. Keep
+			# mixed profiles separate so one known tile cannot hide another's run.
+			for account in selected:
+				code = _supervise(kind, [account], invoked_at, invoked_clock)
+				if code: return code
+			return 0
 	deferred = _wait_until_available() if kind == "scheduled" else None
 	if deferred is not None and run_lock.status(directory=str(settings.user_data_dir())) is not None:
 		logger.info("Scheduled check skipped because browser profiles are in use")
@@ -128,7 +144,8 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 		"REWARDS_SUPERVISOR_PID": str(os.getpid()), run_record.APP_VERSION_ENV: __version__, "PYTHONUTF8": "1", "USE_VIRTUAL_DESKTOP": "0"}
 	if accounts is not None:
 		env["REWARDS_ACCOUNTS"] = "" if accounts == ["@root"] else ",".join(accounts)
-	edge_plan = edge_streak.plan(s, kind, invoked_at, elapsed_seconds=time.monotonic() - invoked_clock, accounts=len(accounts or active_accounts))
+	edge_plan = edge_streak.plan(s, kind, invoked_at, elapsed_seconds=time.monotonic() - invoked_clock,
+		accounts=len(selected), account_ids=selected, user_data_dir=settings.user_data_dir())
 	env.update(edge_plan["env"])
 	if edge_plan["slot"] is not None:
 		run_record.append_event(str(path), "edge_streak_plan", run_id, **{key:value for key,value in edge_plan.items() if key != "env"})

@@ -37,6 +37,8 @@ class EdgeSettingTests(unittest.TestCase):
 
 	def test_only_last_slot_fill_and_budget_enable_child(self):
 		from rfapp import edge_streak
+		with patch.object(self,"home",self.root,create=True), patch.object(self,"folder",self.root / "runs",create=True):
+			EdgeSupervisorTests.prior_state(self)
 		values = {**settings._DEFAULTS, "run.edge_streak":"fill"}
 		for kind, clock, mode, enabled in (
 			("scheduled", "21:45", "fill", True), ("scheduled", "21:59", "fill", True),
@@ -44,11 +46,14 @@ class EdgeSettingTests(unittest.TestCase):
 			("run_now", "21:45", "fill", False), ("check_now", "21:45", "fill", False),
 			("scheduled", "21:45", "off", False), ("scheduled", "21:45", "remind", False)):
 			at = datetime.fromisoformat("2026-11-11T" + clock + ":00+01:00")
-			plan = edge_streak.plan({**values, "run.edge_streak":mode}, kind, at, elapsed_seconds=0, accounts=1)
+			plan = edge_streak.plan({**values, "run.edge_streak":mode}, kind, at, elapsed_seconds=0, accounts=1,
+				account_ids=["account-1"],user_data_dir=self.root / "profile")
 			self.assertEqual(plan["enabled"], enabled, (kind,clock,mode))
 			self.assertEqual(plan["env"]["EDGE_BROWSING_STREAK"], str(enabled).lower())
 			if enabled: self.assertEqual(plan["env"]["REWARDS_HEADLESS"], "true")
-		late = edge_streak.plan(values, "scheduled", datetime(2026,11,11,21,45), elapsed_seconds=2500, accounts=2)
+		late = edge_streak.plan(values, "scheduled", datetime(2026,11,11,21,45), elapsed_seconds=2500, accounts=2,
+			account_ids=["account-1"],user_data_dir=self.root / "profile")
+		self.assertTrue(late["enabled"])
 		self.assertLessEqual(2500 + 2 * float(late["env"]["EDGE_BROWSING_STREAK_MAX_MINUTES"]) * 60 + 300, 3590)
 		self.assertFalse(edge_streak.plan(values, "scheduled", datetime(2026,11,11,21,45), elapsed_seconds=3280, accounts=1)["enabled"])
 
@@ -215,9 +220,121 @@ class EdgeSupervisorTests(unittest.TestCase):
 		supervisor_fixtures.SupervisorTests.setUp(self)
 		self.stack.enter_context(patch("rfapp.edge_streak.process_age",return_value=0))
 
+	def prior_state(self, *, account="account-1", stamp="2026-11-11T13:45:00+01:00", tile=True, minutes=4, target=30):
+		at = datetime.fromisoformat(stamp)
+		run_id = at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-aaaa"
+		base = {"v":run_record.SCHEMA_VERSION,"run_id":run_id,"ts":stamp}
+		events = [dict(base,type="run_start",trigger="scheduled",accounts=[account],plan={}),
+			dict(base,type="account_start",account=account,profile=str(self.home / "profile" / account)),
+			dict(base,type="state",account=account,phase="after",edge_tile=tile,edge_minutes=minutes,edge_target=target),
+			dict(base,type="run_end",result="checked",exit_code=0)]
+		self.folder.mkdir(exist_ok=True)
+		(self.folder / (run_id + ".jsonl")).write_text("\n".join(map(json.dumps,events)) + "\n")
+
+
+	def evening_env(self, chosen=None):
+		self.settings.update({**settings._DEFAULTS,"run.edge_streak":"fill"})
+		self.active_accounts = ["account-1"]
+		proc = SimpleNamespace(pid=123,returncode=0,poll=lambda:0)
+		inherited = {key:value for key,value in os.environ.items() if key != "REWARDS_HEADLESS"}
+		if chosen is not None: inherited["REWARDS_HEADLESS"] = chosen
+		with patch.object(supervisor,"datetime") as dates, patch.object(supervisor,"_wait_until_available",return_value=None), patch.object(supervisor,"Job"), patch.object(supervisor.paths,"farmer_command",return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc) as popen, patch.dict(os.environ,inherited,clear=True):
+			dates.now.return_value = datetime(2026,11,11,21,50,tzinfo=timezone(timedelta(hours=1)))
+			self.assertEqual(supervisor.supervise("scheduled"),0)
+		return popen.call_args.kwargs["env"]
+
+
+	def test_fill_without_tile_keeps_normal_visible_evening_run(self):
+		self.prior_state(tile=False,minutes=None,target=None)
+		env = self.evening_env()
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+		self.assertNotIn("REWARDS_HEADLESS",env)
+
+
+	def test_fill_with_no_earlier_observation_keeps_browser_choice(self):
+		env = self.evening_env("false")
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+		self.assertEqual(env["REWARDS_HEADLESS"],"false")
+
+
+	def test_fill_with_unknown_minutes_keeps_browser_choice(self):
+		self.prior_state(minutes=None)
+		env = self.evening_env("false")
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+		self.assertEqual(env["REWARDS_HEADLESS"],"false")
+
+
+	def test_fill_with_open_tile_from_earlier_today_runs_hidden(self):
+		self.prior_state()
+		env = self.evening_env("false")
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"true")
+		self.assertEqual(env["REWARDS_HEADLESS"],"true")
+
+
+	def test_fill_with_yesterdays_tile_keeps_browser_choice(self):
+		self.prior_state(stamp="2026-11-10T13:45:00+01:00")
+		env = self.evening_env("false")
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+		self.assertEqual(env["REWARDS_HEADLESS"],"false")
+
+
+	def test_fill_with_complete_tile_keeps_browser_choice(self):
+		self.prior_state(minutes=30)
+		env = self.evening_env("false")
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+		self.assertEqual(env["REWARDS_HEADLESS"],"false")
+
+
+	def test_no_tile_preserves_explicit_hidden_choice_too(self):
+		self.prior_state(tile=False,minutes=None,target=None)
+		env = self.evening_env("true")
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+		self.assertEqual(env["REWARDS_HEADLESS"],"true")
+
+
+	def test_latest_absent_or_unknown_state_overrides_earlier_open_tile(self):
+		for tile, minutes, target in ((False,None,None),(None,None,None),(True,None,30),(True,4,None)):
+			with self.subTest(tile=tile,minutes=minutes,target=target):
+				self.prior_state()
+				self.prior_state(stamp="2026-11-11T17:45:00+01:00",tile=tile,minutes=minutes,target=target)
+				env = self.evening_env("false")
+				self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+				self.assertEqual(env["REWARDS_HEADLESS"],"false")
+
+
+	def test_current_evening_observation_does_not_grant_its_own_topup(self):
+		self.prior_state(stamp="2026-11-11T21:46:00+01:00")
+		env = self.evening_env("false")
+		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
+		self.assertEqual(env["REWARDS_HEADLESS"],"false")
+
+
+	def test_only_same_local_day_not_utc_day_grants_hidden_topup(self):
+		# Same UTC day, but this observation was yesterday in the schedule's zone.
+		self.prior_state(stamp="2026-11-11T00:30:00+04:00")
+		from rfapp import edge_streak
+		self.assertEqual(edge_streak.open_accounts(["account-1"],datetime(2026,11,11,21,45,tzinfo=timezone(timedelta(hours=-4))),user_data_dir=self.home / "profile"),set())
+
+
+	def test_mixed_profiles_keep_no_tile_profile_visible_and_bind_env_per_account(self):
+		self.settings.update({**settings._DEFAULTS,"run.edge_streak":"fill"})
+		self.active_accounts = ["account-1","account-2"]
+		self.prior_state()
+		# Separate run id to avoid replacing the first profile's observation.
+		self.prior_state(account="account-2",stamp="2026-11-11T13:46:00+01:00",tile=False,minutes=None,target=None)
+		proc = SimpleNamespace(pid=123,returncode=0,poll=lambda:0)
+		with patch.object(supervisor,"datetime") as dates, patch.object(supervisor,"_wait_until_available",return_value=None), patch.object(supervisor,"Job"), patch.object(supervisor.paths,"farmer_command",return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc) as popen, patch.dict(os.environ,{"REWARDS_HEADLESS":"false"}):
+			dates.now.return_value = datetime(2026,11,11,21,50,tzinfo=timezone(timedelta(hours=1)))
+			self.assertEqual(supervisor.supervise("scheduled"),0)
+		envs = {call.kwargs["env"]["REWARDS_ACCOUNTS"]:call.kwargs["env"] for call in popen.call_args_list}
+		self.assertEqual(set(envs),{"account-1","account-2"})
+		self.assertEqual((envs["account-1"]["EDGE_BROWSING_STREAK"],envs["account-1"]["REWARDS_HEADLESS"]),("true","true"))
+		self.assertEqual((envs["account-2"]["EDGE_BROWSING_STREAK"],envs["account-2"]["REWARDS_HEADLESS"]),("false","false"))
+
 	def test_real_supervisor_env_overrides_true_outside_evening_fill(self):
 		self.settings.update(settings._DEFAULTS)
 		self.active_accounts = ["account-1"]
+		self.prior_state()
 		for kind, hour, mode, enabled in (("scheduled",21,"fill",True), ("scheduled",17,"fill",False),
 			("scheduled",21,"remind",False), ("scheduled",21,"off",False), ("run_now",21,"fill",False), ("check_now",21,"fill",False)):
 			self.settings["run.edge_streak"] = mode
@@ -233,6 +350,7 @@ class EdgeSupervisorTests(unittest.TestCase):
 		from rfapp import edge_streak
 		self.settings.update({**settings._DEFAULTS,"run.edge_streak":"fill"})
 		self.active_accounts = ["account-1"]
+		self.prior_state()
 		clock, ended = [0.0], []
 		proc = SimpleNamespace(pid=123,returncode=None)
 		proc.poll = lambda:proc.returncode

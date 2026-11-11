@@ -132,13 +132,44 @@ def last_slot(values, at):
 	return None
 
 
-def plan(values, kind, at, *, elapsed_seconds, accounts):
+def open_accounts(account_ids, slot, *, user_data_dir):
+	"""A Fill choice is not evidence that any profile has an Edge tile."""
+	if slot.tzinfo is None: slot = slot.astimezone()
+	selected = set(account_ids)
+	latest = {}
+	rules = account_history.aliases()
+	try:
+		for run_id in run_record.list_run_ids(str(paths.runs_dir())):
+			events = account_history.project_events(run_record.read_events(str(paths.runs_dir() / (run_id + ".jsonl"))), str(user_data_dir), rules)
+			if any(event.get("v") != run_record.SCHEMA_VERSION for event in events): continue
+			start = next((event for event in events if event.get("type") == "run_start"), {})
+			started = _at(start.get("ts"))
+			if started is None or started >= slot or started.astimezone(slot.tzinfo).date() != slot.date(): continue
+			profiles = {event.get("account"):event.get("profile") for event in events if event.get("type") == "account_start"}
+			for event in events:
+				if event.get("type") != "state": continue
+				account = stats_ledger.account_id(event.get("account"), profiles.get(event.get("account")), str(user_data_dir))
+				at = _at(event.get("ts"))
+				if account not in selected or at is None or at >= slot or at.astimezone(slot.tzinfo).date() != slot.date(): continue
+				if account not in latest or at >= latest[account][0]: latest[account] = (at, event)
+	except (OSError, ValueError):
+		logger.warning("Edge tile history unavailable; top-up disabled")
+		return set()
+	return {account for account, (_, event) in latest.items() if event.get("edge_tile") is True
+		and _minutes(event.get("edge_minutes")) is not None and _known_target(event.get("edge_target")) is not None
+		and event["edge_minutes"] < event["edge_target"]}
+
+
+def plan(values, kind, at, *, elapsed_seconds, accounts, account_ids=(), user_data_dir=None):
 	slot = last_slot(values, at) if kind == "scheduled" else None
 	remaining = max(0, HARD_STOP_SECONDS - max(0, elapsed_seconds))
 	# Divide a single global allowance across the profiles already selected by
 	# this run. Prior task time is enforced again by the supervisor stop bound.
 	maximum = min(35, math.floor(remaining / max(1, accounts) / 60 * 1000) / 1000)
 	enabled = slot is not None and effective_mode(values.get("run.edge_streak", "off")) == "fill" and maximum >= 1
+	if enabled:
+		known = open_accounts(account_ids, slot, user_data_dir=user_data_dir)
+		enabled = bool(account_ids) and set(account_ids) <= known
 	env = {"EDGE_BROWSING_STREAK":str(enabled).lower(), "EDGE_BROWSING_STREAK_MAX_MINUTES":format(maximum if enabled else 0, ".8g")}
 	if enabled: env["REWARDS_HEADLESS"] = "true"
 	return {"enabled":enabled, "slot":slot.isoformat() if slot else None, "maximum_minutes":maximum if enabled else 0,
