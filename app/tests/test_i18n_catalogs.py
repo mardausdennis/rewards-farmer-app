@@ -99,11 +99,13 @@ def validate_catalogs(root: Path, require_complete: bool) -> list[str]:
 				plural = "plural" in entry
 				fields = {"plural", "forms"} if plural else {"text"}
 				fields.add("note" if locale == "en" else "src")
+				if locale != "en" and "note" in entry:
+					fields.add("note")
 				assert set(entry) == fields, "Invalid entry fields"
-				if locale == "en":
+				if "note" in fields:
 					assert isinstance(entry["note"], str) and entry["note"].strip(), "Missing translator note"
 					_placeholders(entry["note"])
-				else:
+				if locale != "en":
 					assert isinstance(entry["src"], str) and re.fullmatch(r"[0-9a-f]{8}", entry["src"]), "Invalid source hash"
 				if plural:
 					assert isinstance(entry["plural"], str) and re.fullmatch(r"[a-z][a-z0-9_]*", entry["plural"]), "Invalid plural driver"
@@ -231,6 +233,36 @@ class CatalogTests(unittest.TestCase):
 		}, glossary["ui_terms"]["Quests"])
 		self.assertEqual("A quest step was unlocked.", _json(CATALOG_ROOT / "en/errors.json")["messages"]["errors.decision.quest_unlocked"]["text"])
 
+	def test_edge_streak_settings_and_reminder_catalogs(self):
+		expected = {
+			"settings.run.edge_streak.label": "Edge browsing streak",
+			"settings.run.edge_streak.off": "Off",
+			"settings.run.edge_streak.remind": "Remind me",
+			"settings.run.edge_streak.fill": "Fill missing minutes",
+			"settings.run.edge_streak.help": "Your own Edge use counts first. Only the last scheduled run fills missing minutes, without a browser window, for up to 35 minutes within its time budget.",
+			"settings.run.edge_streak.auto_off": "Switched to reminders because Microsoft did not count any minutes on two consecutive days.",
+			"tray.notify.edge_streak.title": "Edge browsing streak",
+			"tray.notify.edge_streak.body": "{account}: Microsoft shows {minutes} of {target} minutes today.",
+		}
+		locales = _json(CATALOG_ROOT / "index.json")["locales"]
+		for key, text in expected.items():
+			namespace = key.split(".")[0]
+			source = _json(CATALOG_ROOT / "en" / f"{namespace}.json")["messages"][key]
+			self.assertEqual(text, source["text"])
+			for locale in locales:
+				code = locale["code"]
+				with self.subTest(key=key, locale=code):
+					entry = _json(CATALOG_ROOT / code / f"{namespace}.json")["messages"][key]
+					self.assertTrue(entry["note"].strip())
+					self.assertEqual(sorted(PLACEHOLDER.findall(text)), sorted(PLACEHOLDER.findall(entry["text"])))
+					if code != "en":
+						self.assertEqual(source_hash(source), entry["src"])
+						self.assertNotEqual(text, entry["text"])
+					if key == "tray.notify.edge_streak.title":
+						self.assertLessEqual(len(entry["text"]), 64)
+					if key == "settings.run.edge_streak.help":
+						self.assertIn("35", entry["text"])
+
 	def test_risk_notice_preserves_the_frozen_source(self):
 		path = CATALOG_ROOT / "en" / "common.json"
 		if not path.is_file():
@@ -298,6 +330,27 @@ class ValidatorProofTests(unittest.TestCase):
 
 	def test_valid_fixture(self):
 		self.assertEqual([], validate_catalogs(self.root, True))
+
+	def test_translated_notes_are_optional_and_validated(self):
+		entry = self.target["messages"]["sample.title"]
+		entry["note"] = "Test label; {account} is the account name. Keep short."
+		self.save("ru/sample.json", self.target)
+		self.assertEqual([], validate_catalogs(self.root, True))
+		for invalid in ("", None, "Stray {"):
+			with self.subTest(note=invalid):
+				entry["note"] = invalid
+				self.save("ru/sample.json", self.target)
+				self.assertTrue(validate_catalogs(self.root, True))
+		entry.pop("note")
+		self.save("ru/sample.json", self.target)
+		self.assertEqual([], validate_catalogs(self.root, True))
+
+	def test_translated_notes_do_not_replace_source_hash(self):
+		entry = self.target["messages"]["sample.title"]
+		entry["note"] = "Test label; keep short."
+		entry.pop("src")
+		self.save("ru/sample.json", self.target)
+		self.assertTrue(validate_catalogs(self.root, True))
 
 	def test_placeholder_mutation_is_detected_and_restored(self):
 		self.target["messages"]["sample.title"]["text"] = "Hello {wrong}"

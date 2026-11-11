@@ -16,6 +16,8 @@
     "tray.notify.done.body_no_balance": {"plural": "points", "forms": {"other": "+{points} ポイント"}, "src": "e1bd8366"},
     "tray.notify.done.body_no_points": {"text": "実行が終了しました。詳細は Rewards Farmer を開いて確認してください。", "src": "83691a74"},
     "tray.notify.problem.title": {"text": "Rewards Farmer の状態を確認してください", "src": "bbd38c09"},
+    "tray.notify.edge_streak.title": {"text": "Edge 閲覧の連続記録", "src": "ee3c100f", "note": "Windows reminder notification title. No placeholders. Keep below 64 characters where possible."},
+    "tray.notify.edge_streak.body": {"text": "{account}: Microsoft による今日の閲覧時間は、目標 {target} 分のうち {minutes} 分です。", "src": "49f85afc", "note": "Windows reminder body. {account} is the account label; {minutes} and {target} are formatted counted and target minutes today. Keep each placeholder once; keep concise for long account labels."},
     "tray.notify.signed_out": {"text": "{account} にもう一度サインインしてください。", "src": "161cf976"},
     "tray.notify.closed_to_tray": {"text": "Rewards Farmer は通知領域に常駐しています。閉じるには、そこのメニューで [終了] を選んでください。", "src": "50ddf2a7"}
   }

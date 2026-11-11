@@ -16,6 +16,8 @@
     "tray.notify.done.body_no_balance": {"plural": "points", "forms": {"one": "+{points} ponto", "many": "+{points} pontos", "other": "+{points} pontos"}, "src": "e1bd8366"},
     "tray.notify.done.body_no_points": {"text": "A execução terminou. Abra o Rewards Farmer para ver os detalhes.", "src": "83691a74"},
     "tray.notify.problem.title": {"text": "Rewards Farmer precisa de atenção", "src": "bbd38c09"},
+    "tray.notify.edge_streak.title": {"text": "Sequência de navegação no Edge", "src": "ee3c100f", "note": "Windows reminder notification title. No placeholders. Keep below 64 characters where possible."},
+    "tray.notify.edge_streak.body": {"text": "{account}: a Microsoft mostra {minutes} de {target} minutos hoje.", "src": "49f85afc", "note": "Windows reminder body. {account} is the account label; {minutes} and {target} are formatted counted and target minutes today. Keep each placeholder once; keep concise for long account labels."},
     "tray.notify.signed_out": {"text": "É preciso entrar novamente em {account}.", "src": "161cf976"},
     "tray.notify.closed_to_tray": {"text": "O Rewards Farmer continua na área de notificação. Escolha Sair ali para fechá-lo.", "src": "50ddf2a7"}
   }

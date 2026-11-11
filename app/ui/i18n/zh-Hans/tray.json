@@ -16,6 +16,8 @@
     "tray.notify.done.body_no_balance": {"plural": "points", "forms": {"other": "+{points} 积分"}, "src": "e1bd8366"},
     "tray.notify.done.body_no_points": {"text": "运行已结束。打开 Rewards Farmer 查看详情。", "src": "83691a74"},
     "tray.notify.problem.title": {"text": "Rewards Farmer 有问题需要处理", "src": "bbd38c09"},
+    "tray.notify.edge_streak.title": {"text": "Edge 浏览连续记录", "src": "ee3c100f", "note": "Windows reminder notification title. No placeholders. Keep below 64 characters where possible."},
+    "tray.notify.edge_streak.body": {"text": "{account}：Microsoft 显示今天已浏览 {minutes} 分钟，目标为 {target} 分钟。", "src": "49f85afc", "note": "Windows reminder body. {account} is the account label; {minutes} and {target} are formatted counted and target minutes today. Keep each placeholder once; keep concise for long account labels."},
     "tray.notify.signed_out": {"text": "“{account}”需要你重新登录。", "src": "161cf976"},
     "tray.notify.closed_to_tray": {"text": "Rewards Farmer 仍在托盘中运行。选择托盘菜单中的“退出”即可关闭应用。", "src": "50ddf2a7"}
   }
