@@ -16,7 +16,7 @@ import stats_ledger
 logger = logging.getLogger("rfapp")
 _TASK_IDS = ("daily_set", "explore_on_bing", "visual_search", "misc_cards", "quests", "searches", "bonus")
 _STATE_FIELDS = ("balance", "earned_today", "searches_earned", "searches_max", "daily_set_open", "cards_open", "quests_open", "open_points", "unreadable")
-_EVENT_TYPES = frozenset(("run_start", "account_start", "browser_failed", "state", "decision", "task_start", "search_points", "card_left_open", "task_end", "warning", "account_end", "stop_requested", "run_end", "notified", "deferred"))
+_EVENT_TYPES = frozenset(("run_start", "account_start", "browser_failed", "state", "decision", "task_start", "search_points", "card_left_open", "task_end", "warning", "account_end", "stop_requested", "run_end", "notified", "deferred", "edge_browsing"))
 
 
 def active_run_id() -> str | None:
@@ -73,6 +73,22 @@ def _deferred(events):
 	return value
 
 
+def _edge_browsing(event):
+	fields = ("minutes_before", "minutes_after", "minutes_target", "activated", "maximum_reached", "final_read_success", "outcome", "duration_ms")
+	if type(event.get("v")) is not int or event["v"] != run_record.SCHEMA_VERSION or any(key not in event for key in fields):
+		return None
+	value = {key:event[key] for key in fields}
+	if any(value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in fields[:3]):
+		return None
+	if any(type(value[key]) is not bool for key in fields[3:6]):
+		return None
+	if value["outcome"] not in ("complete", "incomplete", "not_available", "stopped", "error"):
+		return None
+	if type(value["duration_ms"]) is not int or value["duration_ms"] < 0:
+		return None
+	return value
+
+
 def load_run(run_id: str, labels: dict[str, str], user_data_dir: str, *, account_id=None, history_aliases=None) -> dict:
 	path = _path(run_id)
 	if not path.is_file():
@@ -107,7 +123,7 @@ def load_run(run_id: str, labels: dict[str, str], user_data_dir: str, *, account
 			identity = account_history.resolve(_account_id(name, profiles.get(name), user_data_dir), detail["started_at"], rules)
 			row = {"account_id": identity, "label": _label(identity, labels, len(by_name) + 1), "status": "pending", "decision": None,
 				"state_before": None, "state_after": None, "points_now": None, "points_earned": None, "search": None, "error": None,
-				"tasks": [_task(task_id) for task_id in _TASK_IDS]}
+				"tasks": [_task(task_id) for task_id in _TASK_IDS], "edge_browsing": None}
 			by_name[name] = row
 			detail["accounts"].append(row)
 		return by_name[name]
@@ -154,6 +170,10 @@ def load_run(run_id: str, labels: dict[str, str], user_data_dir: str, *, account
 					last_task_balance[name] = event["points_after"]
 		elif type == "search_points":
 			row["search"] = {"earned": event.get("earned"), "max": event.get("max")}
+		elif type == "edge_browsing":
+			# Replace even with null: a malformed later receipt must not present
+			# an older successful attempt as the current outcome.
+			row["edge_browsing"] = _edge_browsing(event)
 		elif type == "account_end":
 			if event.get("error_code"):
 				row["status"] = "skipped" if event["error_code"] in account_history.IDENTITY_ERRORS else "failed"
