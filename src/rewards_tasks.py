@@ -21,6 +21,7 @@ import element_selectors
 import quest_steps
 import run_record
 import page_structure
+import edge_browsing_streak
 
 from constants import DATA_HOME
 
@@ -156,6 +157,8 @@ def _failure_text(exc: BaseException, progress: str | None = None) -> tuple[str,
 		cause = "visual search state: " + exc.state
 	elif isinstance(exc, element_selectors.UnexpectedVisualSearchPanel):
 		cause = str(exc)
+	elif isinstance(exc, edge_browsing_streak.EdgeStreakIncomplete):
+		cause = str(exc)
 	elif isinstance(exc, ElementNeverAppeared):
 		cause = None
 	elif isinstance(exc, (element_selectors.ElementNotReady, TimeoutException)):
@@ -167,7 +170,7 @@ def _failure_text(exc: BaseException, progress: str | None = None) -> tuple[str,
 
 	if progress is None:
 		if cause is None:
-			if isinstance(exc, element_selectors.VisualSearchUnavailable):
+			if isinstance(exc, (element_selectors.VisualSearchUnavailable, edge_browsing_streak.EdgeStreakUnavailable)):
 				return "SKIP", "not available in this UI variant: " + exc.msg
 			return "SKIP", f"not available in this UI variant ({name})"
 
@@ -1087,7 +1090,9 @@ class RewardsTaskUtils:
 		self._balance_timed_out = False
 		have_before = False
 		before, before_diagnostic = None, None
-		for task_id, name, method in TASKS:
+		import edge_browsing_streak
+		tasks = TASKS + (("edge_browsing", "Edge browsing streak", "complete_edge_browsing_streak"),) if edge_browsing_streak.enabled() else TASKS
+		for task_id, name, method in tasks:
 			# Missing task events already mean not_run to the record readers.
 			if only is not None and task_id not in only:
 				continue
@@ -1144,3 +1149,7 @@ class RewardsTaskUtils:
 			# Only logs and record writes separate these boundaries, including
 			# when a turned-off task lies between them. None is shared too.
 			before, before_diagnostic, have_before = after, after_diagnostic, True
+
+	def complete_edge_browsing_streak(self):
+		import edge_browsing_streak
+		return edge_browsing_streak.complete(self)
