@@ -18,16 +18,13 @@ import rewards_tasks
 import run_record
 from fakes import FakeDriver, FakeElement
 
-TITLE = "p.text-globalBody2Strong"
-META = "div.line-clamp-2.text-metadata"
-HEADINGS = 'h1, h2, h3, h4, h5, h6, [role="heading"], p.text-globalBody2Strong'
+HEADINGS = 'h1, h2, h3, h4, h5, h6, [role="heading"]'
 DENNIS = ("Bing Search Streak", "Daily Set Streak", "Bing App Streak", "Visual Search Streak")
 SLIMDEBUG = ("Bing Search Streak", "Daily Set Streak", "Edge Browsing Streak", "Bing App Streak")
 
 
 def tile(title, counter="Activity: 0/1"):
-	return FakeElement(text=title + "\nDay 0 of 7\n" + counter, children={
-		(By.CSS_SELECTOR, TITLE): [FakeElement(text=title)], (By.CSS_SELECTOR, META): [FakeElement(text=counter)]})
+	return FakeElement(text=title + "\nDay 0 of 7\n" + counter)
 
 
 def panel(title="Visual Search Streak", links=()):
@@ -208,7 +205,7 @@ class VisualIdentityTests(unittest.TestCase):
 		section = h.driver.children[(By.ID, "streaks")][0]
 		section.children[(By.TAG_NAME, "button")].reverse()
 		visual = h.tiles[-1]
-		visual.children[(By.CSS_SELECTOR, TITLE)][0].text = "  VISUAL\nSearch\tStreak  "
+		visual.text = "  VISUAL  Search\tStreak  \nActivity: 0/1"
 		self.assertIs(h.tasks.elements.get_open_visual_search_sidebar(), visual)
 		section.children[(By.TAG_NAME, "button")] = [tile("Not Visual Search Streak")]
 		h.driver.children[(By.TAG_NAME, "button")] = [tile("Visual Search Streak")]
@@ -224,7 +221,7 @@ class VisualIdentityTests(unittest.TestCase):
 	def test_completed_day_seven_and_reset_day_zero_use_only_daily_counter(self):
 		for counter, done in (("Activity: 1/1", True), ("Activity: 0/1", False), ("Activity: 0/0", False)):
 			h = Harness(counter=counter)
-			h.tiles[-1].text = "Visual Search Streak\nDay 7 of 7 streak completed."
+			h.tiles[-1].text = "Visual Search Streak\nDay 7 of 7 streak completed.\n" + counter
 			self.assertEqual(h.tasks.elements.visual_search_tile_done_today(), done)
 
 	def test_missing_action_diagnostic_is_durable_and_value_free(self):

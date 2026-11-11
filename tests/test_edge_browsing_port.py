@@ -105,7 +105,7 @@ class EdgeTaskRegistration(unittest.TestCase):
 		def final_loading(url):
 			get(url)
 			if url == edge.EARN and h.clock.now >= 300:
-				h.tile.children[(By.CSS_SELECTOR, "div.line-clamp-2.text-metadata")] = []
+				h.tile.text = h.title
 		h.driver.get = final_loading
 		with self.assertRaises(__import__("element_selectors").ElementNotReady):
 			h.run(maximum="5")

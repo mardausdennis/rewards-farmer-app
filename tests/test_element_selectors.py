@@ -207,7 +207,7 @@ class DailySetOpener(unittest.TestCase):
 	def _driver(self, labels):
 		buttons = [FakeElement(text=text) for text in labels]
 
-		return FakeDriver(children={(By.TAG_NAME, "button"): buttons})
+		return FakeDriver(children={(By.ID, "streaks"): [FakeElement(children={(By.TAG_NAME, "button"): buttons})]})
 
 	def test_matches_the_streak_button(self):
 		driver = self._driver([

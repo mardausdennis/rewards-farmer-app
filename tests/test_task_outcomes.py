@@ -815,9 +815,7 @@ if __name__ == "__main__":
 class RecordedTaskOutcomes(unittest.TestCase):
 	def test_visual_link_wait_is_persisted_without_page_values_and_does_not_leak_to_next_task(self):
 		import run_record
-		opener = FakeElement(text="Visual search streak", children={
-			(By.CSS_SELECTOR, "p.text-globalBody2Strong"): [FakeElement(text="Visual Search Streak")],
-			(By.CSS_SELECTOR, "div.line-clamp-2.text-metadata"): [FakeElement(text="Activity: 0/1")]})
+		opener = FakeElement(text="Visual Search Streak\nActivity: 0/1")
 		panel = FakeElement(attributes={"id": "react-aria-synthetic"})
 		driver = FakeDriver(children={(By.CSS_SELECTOR, '[id$="-tab-/earn"]'): [FakeElement()],
 			(By.ID, "streaks"): [FakeElement(children={(By.TAG_NAME, "button"): [opener]})],

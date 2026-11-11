@@ -44,6 +44,8 @@ class RenderDriver(StateDriver):
 			self.balance = "Loading..." if self.shape == "a" else "12,345"
 		super().get(url)
 		if url == rewards_state.EARN_URL and self.shape != "full":
+			if self.shape in ("a", "b"):
+				self.children[(By.ID, "streaks")] = [FakeElement()]
 			if self.shape == "a":
 				self.children[(By.TAG_NAME, "button")] = []
 			elif self.shape == "b":

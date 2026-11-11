@@ -21,10 +21,7 @@ from test_earn_reload import RenderDriver
 
 
 def streak(title, counter=None, *, displayed=True):
-	return FakeElement(displayed=displayed, children={
-		(By.CSS_SELECTOR, "p.text-globalBody2Strong"): [FakeElement(text=title)],
-		(By.CSS_SELECTOR, "div.line-clamp-2.text-metadata"): [] if counter is None else [FakeElement(text=counter)],
-	})
+	return FakeElement(text=title + ("\n" + counter if counter is not None else ""), displayed=displayed)
 
 
 class EdgeDriver(QuestDriver):
@@ -37,7 +34,7 @@ class EdgeDriver(QuestDriver):
 		super().get(url)
 		if self.current_url == rewards_state.EARN_URL:
 			self.children[(By.ID, "streaks")] = [FakeElement(children={
-				(By.TAG_NAME, "button"): [streak(edge.TITLE, f"Minutes: {self.edge_minutes}/30")],
+				(By.TAG_NAME, "button"): [self.daily_opener, streak(edge.TITLE, f"Minutes: {self.edge_minutes}/30")],
 			})]
 
 
@@ -48,7 +45,7 @@ class EdgeStateReads(unittest.TestCase):
 		def load(url):
 			get(url)
 			if driver.current_url == rewards_state.EARN_URL:
-				driver.children[(By.ID, "streaks")] = [FakeElement(children={(By.TAG_NAME, "button"): list(tiles)})]
+				driver.children[(By.ID, "streaks")] = [FakeElement(children={(By.TAG_NAME, "button"): [driver.daily_opener, *tiles]})]
 		driver.get = load
 		with mock.patch.object(rewards_state.time, "sleep", lambda _: None):
 			return rewards_state.read_state(driver, element_selectors.ElementSelectionUtils(driver), timeout=0)
@@ -58,7 +55,7 @@ class EdgeStateReads(unittest.TestCase):
 
 	def test_uses_shared_parser_and_title_not_tile_position(self):
 		with mock.patch.object(edge, "read_minutes", wraps=edge.read_minutes) as parser:
-			state = self.read([streak("Bing App Streak", "Minutes: 99/100"), streak("  EDGE\n Browsing Streak ", "Minutes: 12/30")])
+			state = self.read([streak("Bing App Streak", "Minutes: 99/100"), streak("  EDGE  Browsing Streak ", "Minutes: 12/30")])
 		self.assertEqual(self.fields(state), (True, 12, 30))
 		self.assertEqual(state.open_points, 0)
 		self.assertIsNone(state.unreadable)
@@ -99,7 +96,7 @@ class EdgeStateReads(unittest.TestCase):
 					get(url)
 					if driver.current_url == rewards_state.EARN_URL:
 						tiles = [streak(edge.TITLE, "Minutes: 10/30")] if driver.attempt == 1 else second
-						driver.children[(By.ID, "streaks")] = [FakeElement(children={(By.TAG_NAME, "button"): tiles})]
+						driver.children[(By.ID, "streaks")] = [FakeElement(children={(By.TAG_NAME, "button"): [driver.daily_opener, *tiles]})]
 				driver.get = load
 				with mock.patch.object(rewards_state.time, "sleep", lambda _: None):
 					state = rewards_state.read_state(driver, element_selectors.ElementSelectionUtils(driver), timeout=0)
