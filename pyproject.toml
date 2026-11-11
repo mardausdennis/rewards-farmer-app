@@ -1,6 +1,6 @@
 [project]
 name = "bing-rewards-bot"
-version = "0.3.5"
+version = "0.3.6"
 description = "Script to farm MS Rewards points on desktop"
 authors = [
     {name = "Carl Furtado",email = "user0332@duck.com"}
