@@ -435,14 +435,19 @@ class TaskEntryProofTests(unittest.TestCase):
 		for task_id, _, method in rewards_tasks.TASKS:
 			with self.subTest(task=task_id):
 				tasks = rewards_tasks.RewardsTaskUtils.__new__(rewards_tasks.RewardsTaskUtils)
-				tasks.elements = types.SimpleNamespace(get_points_breakdown_button=object(), get_all_misc_cards=object())
+				tasks.elements = types.SimpleNamespace(get_points_breakdown_button=object(), get_all_misc_cards=object(), get_earn_tab=object())
 				tasks.switch_to_earn_page = mock.Mock(side_effect=ReachedOwnSection)
 				tasks.switch_to_dashboard = mock.Mock(side_effect=ReachedOwnSection)
+				tasks._visual_click = mock.Mock(side_effect=ReachedOwnSection)
 				with self.assertRaises(ReachedOwnSection):
 					getattr(tasks, method)()
 				if task_id == "bonus":
 					tasks.switch_to_dashboard.assert_called_once_with()
 					tasks.switch_to_earn_page.assert_not_called()
+				elif task_id == "visual_search":
+					tasks._visual_click.assert_called_once_with(tasks.elements.get_earn_tab, "earn_tab")
+					tasks.switch_to_earn_page.assert_not_called()
+					tasks.switch_to_dashboard.assert_not_called()
 				else:
 					tasks.switch_to_earn_page.assert_called_once_with()
 					tasks.switch_to_dashboard.assert_not_called()

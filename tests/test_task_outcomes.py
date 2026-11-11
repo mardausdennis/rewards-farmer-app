@@ -622,7 +622,9 @@ class ProgressInsideTasks(unittest.TestCase):
 			raise NoSuchElementException("no camera button")
 
 		tasks = self._tasks(
+			get_earn_tab=lambda: "earn",
 			get_open_visual_search_sidebar=lambda: "opener",
+			visual_search_tile_done_today=lambda: False,
 			get_search_now_link_from_visual_search_sidebar=search_now,
 			visual_search_done_today=lambda: done_today,
 			get_visual_search_button=no_camera_button,
@@ -646,7 +648,7 @@ class ProgressInsideTasks(unittest.TestCase):
 			output = self._report(tasks, "complete_visual_search")
 
 		self.assertIn(
-			"[FAIL] Visual search: opened the sidebar, then the next element never appeared",
+			"[FAIL] Visual search: opened the sidebar, then visual search state: panel_action_missing",
 			output,
 		)
 
@@ -660,7 +662,7 @@ class ProgressInsideTasks(unittest.TestCase):
 
 		self.assertIn("[OK] Visual search", output)
 		self.assertIn("Visual search is already done for today", output)
-		self.assertEqual(clicked, ["opener"])
+		self.assertEqual(clicked, ["earn", "opener"])
 
 	def test_visual_search_with_a_link_still_goes_to_bing(self):
 		# A running streak is not mistaken for a finished one. The task clicks
@@ -670,14 +672,16 @@ class ProgressInsideTasks(unittest.TestCase):
 		with mock.patch.object(rewards_tasks, "VISUAL_SEARCH_IMAGE_PATH", __file__):
 			output = self._report(tasks, "complete_visual_search")
 
-		self.assertEqual(clicked, ["opener", "search now"])
+		self.assertEqual(clicked, ["earn", "opener", "search now"])
 		self.assertIn(
-			"[FAIL] Visual search: opened the visual search page, then the next element never appeared",
+			"[FAIL] Visual search: opened the visual search page, then visual search state: camera_changed_or_missing",
 			output,
 		)
 
 	def test_visual_search_without_its_sidebar_is_still_skipped(self):
-		tasks = self._tasks(get_open_visual_search_sidebar=object())
+		def missing():
+			raise __import__("element_selectors").VisualSearchUnavailable("shown tiles: Bing App Streak")
+		tasks = self._tasks(get_earn_tab=lambda: "earn", get_open_visual_search_sidebar=missing)
 
 		def wait_for_then_click(getter, timeout=10):
 			raise ElementNeverAppeared("nothing matched")
@@ -811,9 +815,13 @@ if __name__ == "__main__":
 class RecordedTaskOutcomes(unittest.TestCase):
 	def test_visual_link_wait_is_persisted_without_page_values_and_does_not_leak_to_next_task(self):
 		import run_record
-		opener = FakeElement(text="Visual search streak")
+		opener = FakeElement(text="Visual search streak", children={
+			(By.CSS_SELECTOR, "p.text-globalBody2Strong"): [FakeElement(text="Visual Search Streak")],
+			(By.CSS_SELECTOR, "div.line-clamp-2.text-metadata"): [FakeElement(text="Activity: 0/1")]})
 		panel = FakeElement(attributes={"id": "react-aria-synthetic"})
-		driver = FakeDriver(children={(By.TAG_NAME, "button"): [opener], (By.TAG_NAME, "section"): [panel]})
+		driver = FakeDriver(children={(By.CSS_SELECTOR, '[id$="-tab-/earn"]'): [FakeElement()],
+			(By.ID, "streaks"): [FakeElement(children={(By.TAG_NAME, "button"): [opener]})],
+			(By.TAG_NAME, "button"): [opener], (By.TAG_NAME, "section"): [panel]})
 		tasks = make_tasks()
 		tasks.driver, tasks.elements = driver, ElementSelectionUtils(driver)
 		tasks.switch_to_earn_page = lambda: None
@@ -832,7 +840,8 @@ class RecordedTaskOutcomes(unittest.TestCase):
 			with open(recorder.path, encoding="utf-8") as stream:
 				ends = [event for line in stream if (event := json.loads(line)).get("type") == "task_end"]
 		self.assertEqual(ends[0]["element_wait"], {"getter": "get_search_now_link_from_visual_search_sidebar"})
-		self.assertEqual((ends[0]["outcome"], ends[0]["reason_key"], ends[0]["progress"]), ("fail", "element_missing", "opened the sidebar"))
+		self.assertEqual((ends[0]["outcome"], ends[0]["reason_key"], ends[0]["progress"]), ("fail", "not_ready", "opened the sidebar"))
+		self.assertIn("panel_action_missing", ends[0]["detail"])
 		self.assertEqual(ends[1]["outcome"], "ok")
 		self.assertNotIn("element_wait", ends[1])
 

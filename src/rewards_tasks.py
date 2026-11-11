@@ -120,6 +120,14 @@ class SearchQuotaShort(Exception):
 		super().__init__(f"the search points stayed at {earned}/{maximum}")
 
 
+class VisualSearchStateError(TimeoutException):
+	"""An identified stage failed; do not collapse it into a generic page-change."""
+	def __init__(self, state, getter):
+		self.state = state
+		self.element_getter = getter
+		super().__init__("visual search state: " + state)
+
+
 def _failure_text(exc: BaseException, progress: str | None = None) -> tuple[str, str]:
 	"""The tag and the reason a failed task is reported with.
 
@@ -144,6 +152,10 @@ def _failure_text(exc: BaseException, progress: str | None = None) -> tuple[str,
 	# task had not got anywhere yet.
 	if isinstance(exc, SearchQuotaShort):
 		cause = f"the search points stayed at {exc.earned}/{exc.maximum}"
+	elif isinstance(exc, VisualSearchStateError):
+		cause = "visual search state: " + exc.state
+	elif isinstance(exc, element_selectors.UnexpectedVisualSearchPanel):
+		cause = str(exc)
 	elif isinstance(exc, ElementNeverAppeared):
 		cause = None
 	elif isinstance(exc, (element_selectors.ElementNotReady, TimeoutException)):
@@ -155,6 +167,8 @@ def _failure_text(exc: BaseException, progress: str | None = None) -> tuple[str,
 
 	if progress is None:
 		if cause is None:
+			if isinstance(exc, element_selectors.VisualSearchUnavailable):
+				return "SKIP", "not available in this UI variant: " + exc.msg
 			return "SKIP", f"not available in this UI variant ({name})"
 
 		return "FAIL", cause
@@ -192,7 +206,7 @@ def task_failure_report(exc: BaseException, progress: str | None = None) -> tupl
 
 _ELEMENT_GETTERS = frozenset(name for name, value in vars(element_selectors.ElementSelectionUtils).items()
 	if name.startswith("get_") and callable(value))
-_WAIT_WRAPPERS = {"link_or_done": "get_search_now_link_from_visual_search_sidebar", "full_activity_list": "get_daily_set_elements"}
+_WAIT_WRAPPERS = {"link_or_done": "get_search_now_link_from_visual_search_sidebar", "full_activity_list": "get_daily_set_elements", "ready_input": "get_visual_search_file_input", "tile_state": "get_open_visual_search_sidebar"}
 
 
 def _element_getter_code(getter):
@@ -304,6 +318,8 @@ class RewardsTaskUtils:
 
 			try:
 				element_or_elements = element_getter()
+			except (element_selectors.VisualSearchUnavailable, element_selectors.UnexpectedVisualSearchPanel):
+				raise
 			except Exception as exc:
 				# Exception rather than a bare except, so Ctrl+C during a
 				# getter ends the run instead of being retried away.
@@ -481,14 +497,21 @@ class RewardsTaskUtils:
 				)
 
 	def complete_visual_search(self):
-		self.switch_to_earn_page()
-
-		if not os.path.exists(VISUAL_SEARCH_IMAGE_PATH):
-			logger.info("visual_search.jpg not found. Generating visual search image...")
-			import random_image_for_visual_search
-			random_image_for_visual_search.get_random_image()
-
-		self.wait_for_then_click(self.elements.get_open_visual_search_sidebar)
+		self._visual_click(self.elements.get_earn_tab, "earn_tab")
+		try:
+			self.elements.get_open_visual_search_sidebar()
+		except (element_selectors.ElementNotReady, StaleElementReferenceException):
+			self.wait_for_element(self.elements.get_open_visual_search_sidebar)
+		def tile_state():
+			return (self.elements.visual_search_tile_done_today(),)
+		try:
+			completed = self.wait_for_element(tile_state)[0]
+		except TimeoutException as exc:
+			raise VisualSearchStateError("tile_state_unreadable", "get_open_visual_search_sidebar") from exc
+		if completed:
+			logger.info("Visual search is already done for today")
+			return
+		self._visual_click(self.elements.get_open_visual_search_sidebar, "tile_open")
 		self.progress = "opened the sidebar"
 
 		# Once today's visual search is done the panel has no link left to
@@ -505,25 +528,51 @@ class RewardsTaskUtils:
 
 				raise
 
-		if self.wait_for_element(link_or_done) is done:
+		try:
+			result = self.wait_for_element(link_or_done)
+		except TimeoutException as exc:
+			self._log_visual_search_sidebar()
+			raise VisualSearchStateError("panel_action_missing", "get_search_now_link_from_visual_search_sidebar") from exc
+		if result is done:
 			logger.info("Visual search is already done for today")
 
 			return
 
-		self.move_to_and_click(self.elements.get_search_now_link_from_visual_search_sidebar)
+		if not os.path.exists(VISUAL_SEARCH_IMAGE_PATH):
+			logger.info("visual_search.jpg not found. Generating visual search image...")
+			import random_image_for_visual_search
+			random_image_for_visual_search.get_random_image()
+		self._visual_click(self.elements.get_search_now_link_from_visual_search_sidebar, "panel_action")
 
-		self.tab_utils.switch_to_other_tab()
+		try:
+			self.tab_utils.switch_to_other_tab()
+		except StaleElementReferenceException as exc:
+			raise VisualSearchStateError("visual_tab_changed", "get_visual_search_button") from exc
 		self.progress = "opened the visual search page"
 
 		self.dismiss_cookie_consent()
 
-		self.wait_for_then_click(self.elements.get_visual_search_button)
-
-		file_input = self.wait_for_element(self.elements.get_visual_search_file_input)
+		self._visual_click(self.elements.get_visual_search_button, "camera")
 
 		landing_url = self.driver.current_url
 
-		file_input.send_keys(VISUAL_SEARCH_IMAGE_PATH)
+		def ready_input():
+			control = self.elements.get_visual_search_file_input()
+			# File inputs can be intentionally hidden. Force a live reference
+			# read, not visibility, before handing Selenium the file path.
+			control.get_dom_attribute("type")
+			return control
+		try:
+			file_input = self.wait_for_element(ready_input)
+		except TimeoutException as exc:
+			raise VisualSearchStateError("upload_input_missing", "get_visual_search_file_input") from exc
+		try:
+			file_input.send_keys(VISUAL_SEARCH_IMAGE_PATH)
+		except StaleElementReferenceException as exc:
+			# A lost upload response may already have an effect. Re-find before
+			# sending, never resend after an ambiguous send_keys result.
+			if self.driver.current_url == landing_url:
+				raise VisualSearchStateError("upload_input_changed_unconfirmed", "get_visual_search_file_input") from exc
 		self.progress = "uploaded the image"
 
 		# send_keys succeeds even when an overlay ate the click and the image
@@ -534,16 +583,37 @@ class RewardsTaskUtils:
 		try:
 			WebDriverWait(self.driver, 20).until(left_landing_page)
 		except TimeoutException:
-			logger.warning(
-				"Visual search: Bing did not move off %s after the upload, so the "
-				"image was probably not accepted. Please check manually.",
-				landing_url
-			)
+			raise VisualSearchStateError("upload_not_confirmed", "get_visual_search_file_input")
 		else:
 			time.sleep(random.uniform(3, 5))
 
-		self.tab_utils.switch_to_other_tab()
-		self.tab_utils.close_all_other_tabs()
+		try:
+			self.tab_utils.switch_to_other_tab()
+			self.tab_utils.close_all_other_tabs()
+		except StaleElementReferenceException as exc:
+			raise VisualSearchStateError("return_tab_changed", "get_visual_search_file_input") from exc
+
+	def _visual_click(self, getter, state):
+		try:
+			self.wait_for_element(getter)
+			self.move_to_and_click(getter)
+		except element_selectors.VisualSearchUnavailable:
+			raise
+		except (StaleElementReferenceException, NoSuchElementException, TimeoutException) as exc:
+			raise VisualSearchStateError(state + "_changed_or_missing", _element_getter_code(getter)) from exc
+
+	def _log_visual_search_sidebar(self):
+		# The app's run record carries this diagnostic without page text/URLs.
+		try:
+			panel = self.elements.get_visual_search_sidebar()
+			counts = {"links": len(panel.find_elements(By.TAG_NAME, "a")),
+				"buttons": len(panel.find_elements(By.TAG_NAME, "button")),
+				"role_links": len(panel.find_elements(By.CSS_SELECTOR, '[role="link"]'))}
+			run_record.emit("visual_search_panel", state="panel_action_missing", **counts)
+			logger.info("Visual search panel has no matching action or done marker (links=%d, buttons=%d, role_links=%d)",
+				counts["links"], counts["buttons"], counts["role_links"])
+		except Exception:
+			run_record.emit("visual_search_panel", state="panel_unreadable")
 
 	def complete_misc_cards(self):
 		# Recover only the initial read. Retrying the task could click a card twice.

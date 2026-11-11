@@ -1,3 +1,4 @@
+import logging
 import re
 from urllib.parse import urljoin, urlsplit
 
@@ -5,6 +6,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
 from selenium import webdriver
+
+logger = logging.getLogger(__name__)
 
 
 _BALANCE_NUMBER = r"(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,3}(?:\.\d{3})+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+)"
@@ -81,6 +84,14 @@ class ElementNotReady(NoSuchElementException):
 		self.element_getter = element_getter
 
 
+class VisualSearchUnavailable(NoSuchElementException):
+	"""The rendered streak row has no visual-search tile."""
+
+
+class UnexpectedVisualSearchPanel(ValueError):
+	"""A positively identified different panel is unsafe for activity clicks."""
+
+
 class Labels:
 	"""Visible labels the selectors match on.
 
@@ -141,6 +152,7 @@ class ElementSelectionUtils:
 
 	def __init__(self, driver: webdriver.Edge):
 		self.driver = driver
+		self._untitled_visual_panel_logged = False
 
 	# ------------------------------------------------------------------
 	# helpers
@@ -492,29 +504,74 @@ class ElementSelectionUtils:
 	# ------------------------------------------------------------------
 
 	def get_open_visual_search_sidebar(self):
-		try:
-			return self._button_containing(Labels.VISUAL_SEARCH_STREAK)
-		except NoSuchElementException:
-			# Not every layout ships this entry point. Where it does but the
-			# label differs, fall back to the original position in streaks.
-			return self._streaks_button(5)
+		titles, incomplete = [], False
+		for section in self.driver.find_elements(By.ID, "streaks"):
+			try:
+				if not section.is_displayed():
+					continue
+				buttons = [button for button in section.find_elements(By.TAG_NAME, "button") if button.is_displayed()]
+				incomplete |= not buttons
+				for button in buttons:
+					nodes = button.find_elements(By.CSS_SELECTOR, "p.text-globalBody2Strong")
+					labels = [self._visual_label(title.text) for title in nodes if title.is_displayed()]
+					labels = [label for label in labels if label]
+					incomplete |= bool(nodes) and not labels
+					titles.extend(labels)
+					if any(label.casefold() == Labels.VISUAL_SEARCH_STREAK for label in labels):
+						return button
+			except StaleElementReferenceException:
+				incomplete = True
+		if not titles or incomplete:
+			raise ElementNotReady("streaks row has not finished rendering its tile titles")
+		raise VisualSearchUnavailable("visual search streak is not available; shown tiles: " + ", ".join(dict.fromkeys(titles)))
+
+	@staticmethod
+	def _visual_label(text):
+		return " ".join((text or "").split())
+
+	def visual_search_tile_done_today(self):
+		tile = self.get_open_visual_search_sidebar()
+		counters = []
+		for metadata in tile.find_elements(By.CSS_SELECTOR, "div.line-clamp-2.text-metadata"):
+			if metadata.is_displayed():
+				counters.extend((int(done), int(total)) for done, total in re.findall(r"(\d+)\s*/\s*(\d+)", metadata.text or ""))
+		return bool(counters) and all(total > 0 and done >= total for done, total in counters)
+
+	def get_visual_search_sidebar(self):
+		titles, untitled = [], []
+		for section in self.driver.find_elements(By.TAG_NAME, "section"):
+			try:
+				if not (section.get_dom_attribute("id") or "").startswith("react-aria") or not section.is_displayed():
+					continue
+				labels = [self._visual_label(title.text) for title in section.find_elements(By.CSS_SELECTOR, 'h1, h2, h3, h4, h5, h6, [role="heading"], p.text-globalBody2Strong') if title.is_displayed()]
+				labels = [label for label in labels if label]
+				if any(Labels.VISUAL_SEARCH_STREAK in label.casefold() for label in labels):
+					return section
+				titles.extend(labels)
+				if not labels:
+					untitled.append(section)
+			except StaleElementReferenceException:
+				continue
+		if titles:
+			raise UnexpectedVisualSearchPanel("expected Visual Search Streak panel; opened panel: " + ", ".join(dict.fromkeys(titles)))
+		if untitled:
+			sidebar = untitled[0]
+			if not self._untitled_visual_panel_logged:
+				logger.info("Visual search panel has no identifiable title (panels=%d, links=%d, buttons=%d)",
+					len(untitled), len(sidebar.find_elements(By.TAG_NAME, "a")), len(sidebar.find_elements(By.TAG_NAME, "button")))
+				self._untitled_visual_panel_logged = True
+			return sidebar
+		raise ElementNotReady("visual search panel has not appeared")
 
 	def get_search_now_link_from_visual_search_sidebar(self):
-		sidebar = self.get_sidebar_section()
+		sidebar = self.get_visual_search_sidebar()
 
 		for label in (Labels.VISUAL_SEARCH_NOW, Labels.VISUAL_SEARCH_ACTIVATE):
-			try:
-				return self._link_containing(label, sidebar)
-			except NoSuchElementException:
-				continue
-
-		# Fall back to the original positional behaviour.
-		links = sidebar.find_elements(By.TAG_NAME, "a")
-
-		if len(links) < 2:
-			raise NoSuchElementException("visual search sidebar has no usable link")
-
-		return links[1]
+			for link in sidebar.find_elements(By.TAG_NAME, "a"):
+				if (link.is_displayed() and self._visual_label(link.text).casefold() == label
+					and link.get_dom_attribute("aria-disabled") != "true"):
+					return link
+		raise NoSuchElementException("visual search panel has no Search now or Activate streak link")
 
 	def visual_search_done_today(self) -> bool:
 		"""Whether the panel shows today's visual search as done.
@@ -523,12 +580,12 @@ class ElementSelectionUtils:
 		role="link" and aria-disabled="true", and the panel has no <a> left at
 		all, so waiting for the link runs out however long it waits.
 		"""
-		sidebar = self.get_sidebar_section()
+		sidebar = self.get_visual_search_sidebar()
 
 		for control in sidebar.find_elements(By.CSS_SELECTOR, '[role="link"]'):
 			try:
 				if (
-					control.get_dom_attribute("aria-disabled") == "true"
+					control.is_displayed() and control.get_dom_attribute("aria-disabled") == "true"
 					and Labels.VISUAL_SEARCH_NOW in (control.text or "").lower()
 				):
 					return True
