@@ -41,6 +41,7 @@ class BridgeTests(unittest.TestCase):
 		self.signin = {"account_id": "account-1", "state": "waiting", "at": "2026-10-14T18:00:00Z"}
 		self.data = {"run_id": RUN_ID, "active": True, "accounts": []}
 		self.deps = {
+			"edge_streak": SimpleNamespace(snapshot=lambda values, accounts, **kwargs: {"mode":values.get("run.edge_streak", "off"), "auto_off":None, "accounts":[]}),
 			"prefs": SimpleNamespace(load=lambda: dict(self.p), save=lambda changes: self.p.update(changes), invited_friends=lambda: []),
 			"referrals": SimpleNamespace(get_referral_info=Mock(return_value={"link": None, "link_found": False, "referrals": None, "friends": None, "read_at": None, "unreadable": "not_read"})),
 			"i18n": SimpleNamespace(resolve=lambda *args: ("en", "ltr", "en-US"), current=lambda: SimpleNamespace(t=lambda key, **params: key), reload=Mock()),
@@ -647,7 +648,7 @@ class BridgeTests(unittest.TestCase):
 		self.data["detail"] = unchanged
 		(self.home / (RUN_ID + ".log")).write_text(unchanged + " run " + webhook, encoding="utf-8")
 		overview = self.api.get_overview({})["data"]
-		self.assertEqual(set(overview), {"accounts", "run_id", "run", "detail", "schedule", "generated_at", "signin_active"})
+		self.assertEqual(set(overview), {"accounts", "run_id", "run", "detail", "schedule", "generated_at", "signin_active", "edge_streak"})
 		self.assertEqual(overview["run"], {"run_id": RUN_ID})
 		# A dot is a token boundary, but an underscore or letter is not.
 		expected = unchanged.replace("run.log", "<redacted>.log")

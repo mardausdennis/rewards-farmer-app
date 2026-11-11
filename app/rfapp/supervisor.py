@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import time
+from datetime import datetime
 
 from rfapp import __version__, paths, user_state
 from rfapp.winjob import Job
@@ -69,7 +70,10 @@ def _end(path, run_id, result, code, began, detail=None):
 
 
 def supervise(kind: str, accounts: list[str] | None = None) -> int:
-	from rfapp import settings
+	from rfapp import settings, edge_streak
+	invoked_at, invoked_clock = datetime.now().astimezone(), time.monotonic()
+	age = edge_streak.process_age()
+	invoked_clock -= age if age is not None else edge_streak.HARD_STOP_SECONDS
 	if kind not in ("scheduled", "run_now", "check_now"):
 		raise ValueError("Unknown supervisor kind")
 	s = settings.load()
@@ -124,6 +128,10 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 		"REWARDS_SUPERVISOR_PID": str(os.getpid()), run_record.APP_VERSION_ENV: __version__, "PYTHONUTF8": "1", "USE_VIRTUAL_DESKTOP": "0"}
 	if accounts is not None:
 		env["REWARDS_ACCOUNTS"] = "" if accounts == ["@root"] else ",".join(accounts)
+	edge_plan = edge_streak.plan(s, kind, invoked_at, elapsed_seconds=time.monotonic() - invoked_clock, accounts=len(accounts or active_accounts))
+	env.update(edge_plan["env"])
+	if edge_plan["slot"] is not None:
+		run_record.append_event(str(path), "edge_streak_plan", run_id, **{key:value for key,value in edge_plan.items() if key != "env"})
 	proc = job = None
 	try:
 		_set_execution_state(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
@@ -145,6 +153,16 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 			return failed(exc)
 		stop_at = None
 		while proc.poll() is None:
+			if edge_plan["enabled"]:
+				elapsed = time.monotonic() - invoked_clock
+				if elapsed >= edge_streak.STOP_SECONDS and not stop.exists():
+					stop.write_text('{"by":"edge_streak_budget"}', encoding="utf-8")
+					run_record.append_event(str(path), "stop_requested", run_id, by="edge_streak_budget")
+				if elapsed >= edge_streak.HARD_STOP_SECONDS:
+					job.terminate()
+					proc.wait(timeout=5)
+					_end(path, run_id, "stopped", proc.returncode, began)
+					break
 			if stop.exists():
 				if stop_at is None:
 					stop_at = time.monotonic()
@@ -159,6 +177,13 @@ def supervise(kind: str, accounts: list[str] | None = None) -> int:
 				pass
 		code = proc.returncode
 		_end(path, run_id, "stopped" if stop.exists() else "crashed", code, began)
+		if edge_plan["slot"] is not None:
+			try:
+				edge_streak.process_run(run_id, run_record.read_events(str(path)), user_data_dir=str(settings.user_data_dir()))
+			except Exception as exc:
+				# Keep the farmer result and a restart-surviving diagnostic separate.
+				run_record.append_event(str(path), "edge_streak_policy_error", run_id, error=type(exc).__name__)
+				logger.warning("Edge streak policy could not be updated: %s", type(exc).__name__)
 		if kind != "check_now":
 			try:
 				from rfapp import notify

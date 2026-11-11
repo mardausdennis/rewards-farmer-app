@@ -36,11 +36,15 @@ class SettingsSourceTests(unittest.TestCase):
 		from rfapp.settings import SETTING_IDS
 		self.assertEqual(set(FIXTURES), {path.stem for path in (UI_DIR / "mock/settings").glob("*.json")})
 		modes = set()
+		# E2 ships the backend before E5 authors the UI fixtures. Old fixture
+		# omissions mean Off, matching an older DATA_HOME without this setting.
+		def effective(values):
+			return {"run.edge_streak":"off", **values}
 		for name in FIXTURES:
 			fixture = json.loads((UI_DIR / f"mock/settings/{name}.json").read_text(encoding="utf-8"))
 			self.assertIs(fixture["synthetic"], True)
 			data = fixture["methods"]["get_settings"]["data"]
-			self.assertEqual(set(SETTING_IDS) - SECRET_IDS, set(data["values"]), name)
+			self.assertEqual(set(SETTING_IDS) - SECRET_IDS, set(effective(data["values"])), name)
 			self.assertEqual(SECRET_IDS, set(data["secrets_set"]), name)
 			self.assertTrue(all(type(flag) is bool for flag in data["secrets_set"].values()))
 			for method in ("get_settings", "save_settings"):
@@ -48,7 +52,7 @@ class SettingsSourceTests(unittest.TestCase):
 				for entry in answer if isinstance(answer, list) else [answer]:
 					if not entry["ok"]:
 						continue
-					self.assertEqual(set(SETTING_IDS) - SECRET_IDS, set(entry["data"]["values"]), name)
+					self.assertEqual(set(SETTING_IDS) - SECRET_IDS, set(effective(entry["data"]["values"])), name)
 					self.assertEqual(SECRET_IDS, set(entry["data"]["secrets_set"]), name)
 					self.assertIn(entry["data"]["values"]["run.browser_mode"], ("visible", "hidden"), name)
 			modes.add(data["values"]["schedule.mode"])

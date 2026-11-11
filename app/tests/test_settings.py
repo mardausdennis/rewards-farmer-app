@@ -45,7 +45,7 @@ class SettingsTests(unittest.TestCase):
 	def test_all_ids_in_contract_order_and_defaults(self):
 		values = settings.load()
 		self.assertEqual(tuple(values), settings.SETTING_IDS)
-		self.assertEqual(len(values), 27)
+		self.assertEqual(len(values), 28)
 		self.assertNotIn("advanced.export", values)
 		self.assertEqual(values, settings._DEFAULTS)
 		self.assertEqual(settings.active_accounts(), [])
@@ -255,6 +255,7 @@ class SettingsTests(unittest.TestCase):
 		edge.touch()
 		driver.touch()
 		changes = {"schedule.mode": "fixed", "schedule.window_start": "08:00", "schedule.window_end": "20:00", "schedule.checks": 3, "schedule.time": "10:00", "schedule.days": ["mon", "fri"], "schedule.random_delay": 5, "schedule.catch_up": False, "schedule.on_battery": False, "schedule.min_points": 25, "run.browser_mode": "hidden", "run.tasks_off": ["quests"], "run.search_source": "openrouter", "run.ollama_url": "http://localhost:11434/v1", "run.ollama_model": "test:4b", "run.openrouter_key": "fake key with 'quote'", "run.openrouter_model": "openrouter/free", "notify.policy": "errors", "notify.webhook_url": "https://example.test/hook", "app.autostart": True, "app.close_to_tray": False, "app.language": "system", "app.update_check": False, "advanced.edge_path": str(edge), "advanced.driver_path": str(driver), "advanced.log_level": "DEBUG", "advanced.data_folder": str(self.root / "profiles")}
+		changes["run.edge_streak"] = "remind"
 		self.assertEqual(set(changes), set(settings.SETTING_IDS))
 		self.envfile("# untouched\nUNKNOWN=value\n")
 		with patch("run_lock.status", return_value=None):

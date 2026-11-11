@@ -196,7 +196,17 @@ class Bridge:
 		result["schedule"] = self._module("schedule").status()
 		result["generated_at"] = _utc()
 		result["signin_active"] = self._signin_active()
+		if "edge_streak" not in result:
+			result["edge_streak"] = self._edge_streak(values, [row["account_id"] for row in result.get("accounts", [])])
 		return result
+
+	def _edge_streak(self, values, account_ids=None):
+		if account_ids is None: account_ids = [row["id"] for row in self._accounts()]
+		try:
+			return self._module("edge_streak").snapshot(values, account_ids, user_data_dir=str(self._module("settings").user_data_dir()))
+		except (OSError, ValueError):
+			_log.warning("Edge streak overview unavailable")
+			return {"mode":"off", "auto_off":None, "accounts":[]}
 
 	def _signin_active(self):
 		admin = self._module("accounts_admin")
@@ -427,7 +437,8 @@ class Bridge:
 
 	@_method()
 	def get_settings(self, request):
-		return {**self._public_settings(self._module("settings").load()), "schedule": self._module("schedule").status()}
+		values = self._module("settings").load()
+		return {**self._public_settings(values), "schedule": self._module("schedule").status(), "edge_streak":self._edge_streak(values)}
 
 	@_method(required=("changes",))
 	def save_settings(self, request):
@@ -451,7 +462,7 @@ class Bridge:
 		self._schedule_changed(result.get("schedule"))
 		self._push("settings.changed", {})
 		self._push("overview.changed", {})
-		return {**result, **public}
+		return {**result, **public, "edge_streak":self._edge_streak(result.get("values", {**current, **changes}))}
 
 	@_method()
 	def get_schedule_status(self, request):

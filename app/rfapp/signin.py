@@ -216,6 +216,8 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 	dotenv.load_dotenv(stream=io.StringIO(text))
 	os.environ["REWARDS_HEADLESS"] = "0"
 	os.environ["USE_VIRTUAL_DESKTOP"] = "0"
+	os.environ["EDGE_BROWSING_STREAK"] = "false"
+	os.environ["EDGE_BROWSING_STREAK_MAX_MINUTES"] = "0"
 	# browser fixes HEADLESS at import, so it belongs after these overrides.
 	import accounts
 	import browser

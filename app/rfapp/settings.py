@@ -16,7 +16,7 @@ from rfapp.envfile import EnvFile
 
 SETTING_IDS = (
 	"schedule.mode", "schedule.window_start", "schedule.window_end", "schedule.checks", "schedule.time", "schedule.days", "schedule.random_delay", "schedule.catch_up", "schedule.on_battery", "schedule.min_points",
-	"run.browser_mode", "run.tasks_off", "run.search_source", "run.ollama_url", "run.ollama_model", "run.openrouter_key", "run.openrouter_model",
+	"run.browser_mode", "run.tasks_off", "run.search_source", "run.ollama_url", "run.ollama_model", "run.openrouter_key", "run.openrouter_model", "run.edge_streak",
 	"notify.policy", "notify.webhook_url", "app.autostart", "app.close_to_tray", "app.language", "app.update_check",
 	"advanced.edge_path", "advanced.driver_path", "advanced.log_level", "advanced.data_folder",
 )
@@ -25,12 +25,14 @@ _TASK_IDS = ("daily_set", "explore_on_bing", "visual_search", "misc_cards", "que
 _KEYS = {
 	"schedule.mode": "REWARDS_SCHEDULE_MODE", "schedule.checks": "REWARDS_SCHEDULE_CHECKS", "schedule.time": "REWARDS_SCHEDULE_TIME", "schedule.days": "REWARDS_SCHEDULE_DAYS", "schedule.random_delay": "REWARDS_SCHEDULE_RANDOM_DELAY", "schedule.catch_up": "REWARDS_SCHEDULE_CATCH_UP", "schedule.on_battery": "REWARDS_SCHEDULE_ON_BATTERY", "schedule.min_points": "REWARDS_MIN_POINTS",
 	"run.tasks_off": "REWARDS_SKIP_TASKS", "run.ollama_url": "LOCAL_LLM_BASE_URL", "run.ollama_model": "LOCAL_LLM_MODEL", "run.openrouter_key": "OPENROUTER_API_KEY", "run.openrouter_model": "OPENROUTER_MODEL",
+	"run.edge_streak": "REWARDS_EDGE_STREAK",
 	"notify.policy": "REWARDS_NOTIFY", "notify.webhook_url": "REWARDS_WEBHOOK_URL", "advanced.edge_path": "EDGE_BINARY", "advanced.driver_path": "MSEDGEDRIVER_PATH", "advanced.log_level": "REWARDS_FARMER_LOG_LEVEL", "advanced.data_folder": "USER_DATA_DIR",
 }
 _PREF_KEYS = {"app.close_to_tray": "close_to_tray", "app.language": "language", "app.update_check": "update_check"}
 _DEFAULTS = {
 	"schedule.mode": "automatic", "schedule.window_start": "09:45", "schedule.window_end": "21:45", "schedule.checks": 4, "schedule.time": "09:45", "schedule.days": list(_DAYS), "schedule.random_delay": 15, "schedule.catch_up": True, "schedule.on_battery": True, "schedule.min_points": 15,
 	"run.browser_mode": "visible", "run.tasks_off": [], "run.search_source": "ollama", "run.ollama_url": "http://localhost:11434/v1", "run.ollama_model": "gemma3:4b", "run.openrouter_key": "", "run.openrouter_model": "openrouter/free",
+	"run.edge_streak": "off",
 	"notify.policy": "always", "notify.webhook_url": "", "app.autostart": False, "app.close_to_tray": True, "app.language": "system", "app.update_check": True,
 	"advanced.edge_path": "", "advanced.driver_path": "", "advanced.log_level": "INFO", "advanced.data_folder": "",
 }
@@ -112,6 +114,8 @@ def load() -> dict[str, object]:
 	for setting_id, key in _PREF_KEYS.items():
 		values[setting_id] = state[key]
 	values["app.autostart"] = autostart.is_enabled()
+	from rfapp import edge_streak
+	values["run.edge_streak"] = edge_streak.effective_mode(values["run.edge_streak"])
 	return {key: values[key] for key in SETTING_IDS}
 
 
@@ -143,6 +147,7 @@ def validate(changes: dict[str, object], current: dict[str, object]) -> dict[str
 		if key not in SETTING_IDS:
 			errors[key] = "out_of_range"
 	enums = {"schedule.mode": ("automatic", "fixed", "manual"), "run.browser_mode": ("visible", "hidden"), "run.search_source": ("trends", "ollama", "openrouter"), "notify.policy": ("always", "errors", "never"), "advanced.log_level": ("DEBUG", "INFO", "WARNING", "ERROR")}
+	enums["run.edge_streak"] = ("off", "remind", "fill")
 	for key, choices in enums.items():
 		if values.get(key) not in choices:
 			errors[key] = "out_of_range"
@@ -216,6 +221,13 @@ def validate(changes: dict[str, object], current: dict[str, object]) -> dict[str
 
 
 def save(changes: dict[str, object]) -> dict:
+	from rfapp import edge_streak
+	# Auto-off also edits this file in a short-lived process. Serialize every
+	# settings write so an unrelated edit cannot restore its stale Fill value.
+	with edge_streak.transaction(): return _save(changes)
+
+
+def _save(changes: dict[str, object]) -> dict:
 	from rfapp import prefs, schedule
 	if not prefs.load()["setup_done"] and EnvFile.load(paths.env_path()).get("QUERY_SOURCE") is None:
 		# Step 2 can arm the schedule before Finish. Choose its safe source
@@ -225,6 +237,10 @@ def save(changes: dict[str, object]) -> dict:
 	errors = validate(changes, current)
 	if errors:
 		raise _Error("settings.invalid", fields=errors)
+	if changes.get("run.edge_streak") == "fill":
+		from rfapp import edge_streak
+		if edge_streak.load().get("unreadable"):
+			raise OSError("Edge streak state needs recovery")
 	values = {**current, **changes}
 	before_accounts = len(active_accounts())
 	editor = EnvFile.load(paths.env_path())
@@ -250,6 +266,10 @@ def save(changes: dict[str, object]) -> dict:
 	if values["run.search_source"] == "ollama" and editor.get("LOCAL_LLM_MODEL") is None:
 		editor.set("LOCAL_LLM_MODEL", str(values["run.ollama_model"]))
 	editor.save()
+	if changes.get("run.edge_streak") == "fill":
+		# Only clear the prior guard after Fill was durably selected. If that
+		# write fails, the old auto-off record must still block the next run.
+		edge_streak.reset()
 	prefs.save({pref: values[key] for key, pref in _PREF_KEYS.items() if key in changes})
 	if "app.autostart" in changes:
 		autostart.set_enabled(values["app.autostart"])
