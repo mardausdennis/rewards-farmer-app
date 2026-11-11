@@ -25,6 +25,13 @@ INSTALLER_LANGUAGES = {
 }
 
 
+def packaging_text_files(root):
+	for directory, directories, filenames in os.walk(root):
+		directories[:] = [name for name in directories if name not in ("__pycache__", "build")]
+		for name in filenames:
+			yield Path(directory) / name
+
+
 def installer_language_entries():
 	text = (PACKAGING / "RewardsFarmer.iss").read_text(encoding="utf-8")
 	section = text.split("[Languages]", 1)[1].split("[InstallDelete]", 1)[0]
@@ -274,12 +281,20 @@ class PackagingTests(unittest.TestCase):
 		self.assertEqual(installer_user_message_expressions(probe)[0][-1], ("SuppressibleMsgBox", ["'literal, with; punctuation'"]))
 
 	def test_packaging_has_no_typographic_dashes(self):
-		for directory, directories, filenames in os.walk(PACKAGING):
-			directories[:] = [name for name in directories if name != "__pycache__"]
-			for name in filenames:
-				path = Path(directory) / name
-				text = path.read_text(encoding="utf-8")
-				self.assertNotRegex(text, "[\u2013\u2014]", str(path.relative_to(PACKAGING)))
+		for path in packaging_text_files(PACKAGING):
+			text = path.read_text(encoding="utf-8")
+			self.assertNotRegex(text, "[\u2013\u2014]", str(path.relative_to(PACKAGING)))
+
+	def test_packaging_text_inventory_keeps_sources_and_excludes_generated_files(self):
+		with tempfile.TemporaryDirectory() as folder:
+			root = Path(folder)
+			for name in ("build", "__pycache__", "languages"):
+				(root / name).mkdir()
+			(root / "build/payload.exe").write_bytes(b"\xcb")
+			(root / "__pycache__/module.pyc").write_bytes(b"\xcb")
+			(root / "RewardsFarmer.iss").write_text("source", encoding="utf-8")
+			(root / "languages/en.isl").write_text("source", encoding="utf-8")
+			self.assertEqual({path.relative_to(root).as_posix() for path in packaging_text_files(root)}, {"RewardsFarmer.iss", "languages/en.isl"})
 
 	def test_only_uninstall_allows_a_wmi_query_exception(self):
 		text = (PACKAGING / "RewardsFarmer.iss").read_text(encoding="utf-8")

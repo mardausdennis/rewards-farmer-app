@@ -16,7 +16,7 @@ def embedded_identifiers(roots):
 	problems = []
 	for root in roots:
 		for path in root.rglob("*"):
-			if not path.is_file() or path.suffix not in TEXT_SUFFIXES or any(part in ("__pycache__", "node_modules", "dist", "build") for part in path.parts):
+			if not path.is_file() or path.suffix not in TEXT_SUFFIXES or any(part in ("__pycache__", "node_modules", "dist", "build") for part in path.relative_to(root).parts):
 				continue
 			for match in URL.finditer(path.read_text(encoding="utf-8")):
 				parsed = urlsplit(match.group())
@@ -50,3 +50,16 @@ class EmbeddedReferralTests(unittest.TestCase):
 				self.assertEqual(embedded_identifiers([root]), ["sample.json"])
 				path.write_text('"https://rewards.bing.com/' + prefix + '/SYNTHETIC"', encoding="utf-8")
 				self.assertEqual(embedded_identifiers([root]), [])
+
+	def test_scanner_applies_exclusions_inside_root_not_to_its_parents(self):
+		with tempfile.TemporaryDirectory() as folder:
+			root = Path(folder) / "build" / "scan-root"
+			root.mkdir(parents=True)
+			value = '"https://rewards.bing.com/refer?' + 'code=NOT_PUBLIC_EXAMPLE"'
+			(root / "sample.json").write_text(value, encoding="utf-8")
+			for name in ("build", "dist", "node_modules", "__pycache__"):
+				(root / name).mkdir()
+				(root / name / "ignored.json").write_text(value, encoding="utf-8")
+			self.assertEqual(embedded_identifiers([root]), ["sample.json"])
+			(root / "sample.json").write_text('"https://rewards.bing.com/refer?code=SYNTHETIC"', encoding="utf-8")
+			self.assertEqual(embedded_identifiers([root]), [])
