@@ -9,7 +9,7 @@ timeout bounds each DOM wait, not the whole snapshot. Navigation uses the
 driver's own page-load timeout, which the caller should also bound.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import logging
 import re
@@ -164,6 +164,7 @@ class RewardsState:
 	edge_tile: bool = False
 	edge_minutes: int | None = None
 	edge_target: int | None = None
+	reader_attempt: int = 1
 
 
 def worth_running(state: RewardsState, threshold: int) -> bool | None:
@@ -373,7 +374,8 @@ def _quest_ready(driver, url):
 
 
 def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str] = frozenset(), *, phase: str = "before") -> RewardsState:
-	"""Keep the second read only, after at most one partial-render recovery."""
+	"""Keep the less-unreadable whole read; the recovery wins a tie."""
+	kept, kept_missing = None, None
 	for attempt in (1, 2):
 		observed = []
 		state = _read_state_attempt(driver, elements, timeout, skip_cards, phase=phase, observed=observed, recovery=attempt == 2)
@@ -383,11 +385,17 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 		reason = state.unreadable or (page_structure.missing_sections(partial) if partial else None)
 		if reason:
 			page_structure.capture_once(driver, reason, attempt=attempt, reloaded=attempt == 2, packet=packet)
-		if (attempt == 2 or partial is None
-			or state.unreadable and any(code in ("page_blank", "signed_out", "terms_of_use") for code in state.unreadable.split(","))):
-			return state
+		# A redirect or blank document still stops the read; earlier measurements
+		# must not authorize work after the current page has failed its guard.
+		if state.unreadable and any(code in ("page_blank", "signed_out", "terms_of_use") for code in state.unreadable.split(",")):
+			return replace(state, reader_attempt=attempt)
+		missing = len(state.unreadable.split(",")) if state.unreadable else 0
+		if kept is None or missing <= kept_missing:
+			kept, kept_missing = replace(state, reader_attempt=attempt), missing
+		if attempt == 2 or partial is None:
+			return kept
 		# The next attempt's initial _require_earn_page does the one recovery
-		# navigation. Never recurse or merge the first attempt's measurements.
+		# navigation. Select one whole result, including its Edge observations.
 
 
 def _read_state_attempt(driver, elements, timeout, skip_cards, *, phase, observed, recovery):

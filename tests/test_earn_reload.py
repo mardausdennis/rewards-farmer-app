@@ -1,5 +1,6 @@
 """F148 partial earn renders: real reader/selectors, JS snapshot and record."""
 import json
+from dataclasses import asdict
 from pathlib import Path
 import sys
 import tempfile
@@ -10,10 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import page_structure
 import rewards_state
 import run_record
+import main
+import rewards_tasks
 from fakes import FakeElement
 from selenium.webdriver.common.by import By
 from test_reader_header import figure, javascript, node
 from test_rewards_state import StateDriver, misc_card
+from test_quest_only import record_run
 
 
 def document(shape):
@@ -134,13 +138,11 @@ class EarnReloadTests(unittest.TestCase):
 				self.assertEqual(driver.clicks, [])
 				self.assertEqual([(row["attempt"], row["reloaded"]) for row in rows], [(1, False)])
 
-	def test_second_attempt_is_authoritative_not_merged_with_first(self):
+	def test_worse_second_attempt_keeps_first_whole_read(self):
 		driver = RenderDriver(first="c", second="a")
 		state, rows = self.read(driver)
-		self.assertIsNone(state.balance)
-		self.assertIsNone(state.searches_earned)
-		self.assertIsNone(state.earned_today)
-		self.assertEqual(state.unreadable, "searches,daily_set,cards,quests,balance")
+		self.assertEqual((state.balance, state.searches_earned, state.earned_today), (12345, 60, 2345))
+		self.assertEqual(state.unreadable, "cards,quests")
 		self.assertEqual(len(rows), 2)
 
 	def test_skip_cards_is_preserved_on_second_read(self):
@@ -241,6 +243,144 @@ class EarnReloadTests(unittest.TestCase):
 				self.assertNotIn("987654", json.dumps(rows))
 			finally:
 				run_record.close_run("checked", 0)
+
+
+class SelectionDriver(RenderDriver):
+	"""Sections may have read before the final earn document loses its controls."""
+	def __init__(self, first="c", second="a", *, fixed_snapshot=False, second_redirect=None, edge_first=True):
+		super().__init__(first, second)
+		self.fixed_snapshot = fixed_snapshot
+		self.second_redirect = second_redirect
+		self.edge_first = edge_first
+		self.set_page_load_timeout = mock.Mock()
+		self.set_script_timeout = mock.Mock()
+		self.execute_cdp_cmd = mock.Mock()
+
+	def get(self, url):
+		if self.earn_loads == 4 and url == rewards_state.EARN_URL:
+			self.redirect = self.second_redirect
+		super().get(url)
+		if self.current_url != rewards_state.EARN_URL or self.redirect:
+			return
+		if self.shape != "a":
+			self.balance = "1,001" if self.attempt == 1 else "2,002"
+			self.children[(By.TAG_NAME, "header")][0].children[(By.TAG_NAME, "button")][0].text = self.balance
+		self.searches = "0/60" if self.attempt == 1 else "30/60"
+		self.daily_done = 1 if self.attempt == 1 else 3
+		if (self.attempt == 1) == self.edge_first:
+			self.children[(By.ID, "streaks")][0].children.setdefault((By.TAG_NAME, "button"), []).append(
+				FakeElement(text="Edge Browsing Streak\nMinutes: 5/30" if self.attempt == 1 else "Edge Browsing Streak\nMinutes: 25/30"))
+
+	def execute_script(self, script, *args):
+		if script == page_structure.SNAPSHOT and self.earn_loads in self.blank_loads:
+			return javascript(script, node("document", children=[node("body")]))
+		if script == page_structure.SNAPSHOT and self.fixed_snapshot:
+			packet = javascript(script, document("a"), url=self.current_url)
+			return {**packet, "counts": {**packet["counts"], "buttons": 25, "sections": 10}}
+		return super().execute_script(script, *args)
+
+
+class ReloadSelectionTests(unittest.TestCase):
+	# Reuse the recorder helper without inheriting the original test cases.
+	read = EarnReloadTests.read
+
+	def observed_read(self, driver):
+		attempts = []
+		read = rewards_state._read_state_attempt
+		def observe(*args, **kwargs):
+			state = read(*args, **kwargs)
+			attempts.append(state)
+			return state
+		with mock.patch.object(rewards_state, "_read_state_attempt", side_effect=observe):
+			state, rows = self.read(driver)
+		return state, rows, attempts
+
+	def assert_whole_read(self, state, attempts, number):
+		fields = asdict(state)
+		self.assertEqual(fields.pop("reader_attempt"), number)
+		expected = asdict(attempts[number - 1])
+		expected.pop("reader_attempt")
+		self.assertEqual(fields, expected)
+
+	def test_dbe4_same_document_shape_keeps_better_first_read_and_run_decision(self):
+		state, rows, attempts = self.observed_read(SelectionDriver(fixed_snapshot=True))
+		self.assertEqual([attempt.unreadable for attempt in attempts], ["cards,quests", "searches,daily_set,cards,quests,balance"])
+		self.assertEqual(rows[0]["matched"], rows[1]["matched"])
+		self.assertEqual(rows[0]["counts"], rows[1]["counts"])
+		self.assertTrue(all(row["rendered"] for row in rows))
+		self.assertEqual({key: rows[0]["matched"][key] for key in ("streaks", "breakdown", "cards", "quests", "header_figures")},
+			{"streaks": 1, "breakdown": 0, "cards": 0, "quests": 0, "header_figures": 0})
+		self.assertEqual((rows[0]["counts"]["buttons"], rows[0]["counts"]["sections"]), (25, 10))
+		self.assertEqual(state.unreadable, "cards,quests")
+		self.assertTrue(rewards_state.worth_running(state, 15))
+		self.assertEqual(main.decide(state, main.RunPlan(only_if_open=True, min_points=15)), (True, "enough_open"))
+		self.assert_whole_read(state, attempts, 1)
+
+	def test_better_second_read_is_kept_without_first_edge_values(self):
+		state, _, attempts = self.observed_read(SelectionDriver(first="a", second="c"))
+		self.assertEqual(state.unreadable, "cards,quests")
+		self.assertFalse(state.edge_tile)
+		self.assertIsNone(state.edge_minutes)
+		self.assert_whole_read(state, attempts, 2)
+
+	def test_tie_uses_second_read_even_with_different_values_and_no_edge_tile(self):
+		state, _, attempts = self.observed_read(SelectionDriver(first="c", second="c"))
+		self.assertEqual(attempts[0].unreadable, attempts[1].unreadable)
+		self.assertEqual((state.balance, state.searches_earned, state.daily_set_open, state.open_points), (2002, 30, 0, 30))
+		self.assertFalse(state.edge_tile)
+		self.assert_whole_read(state, attempts, 2)
+
+	def test_equal_section_counts_choose_second_even_when_missing_sections_differ(self):
+		driver = SelectionDriver(first="c", second="full", edge_first=False)
+		get = driver.get
+		def load(url):
+			get(url)
+			if driver.attempt == 2:
+				driver.children[(By.TAG_NAME, "button")] = []
+				driver.children[(By.ID, "streaks")] = [FakeElement()]
+		driver.get = load
+		state, _, attempts = self.observed_read(driver)
+		self.assertEqual([attempt.unreadable for attempt in attempts], ["cards,quests", "searches,daily_set"])
+		self.assertEqual(state.unreadable, "searches,daily_set")
+		self.assertIsNone(state.searches_earned)
+		self.assertEqual(state.balance, 2002)
+		self.assert_whole_read(state, attempts, 2)
+
+	def test_first_read_does_not_import_new_edge_measurements_from_worse_second(self):
+		state, _, attempts = self.observed_read(SelectionDriver(edge_first=False))
+		self.assertTrue(attempts[1].edge_tile)
+		self.assertFalse(state.edge_tile)
+		self.assertIsNone(state.edge_minutes)
+		self.assert_whole_read(state, attempts, 1)
+
+	def test_second_whole_page_failure_still_overrides_earlier_known_work(self):
+		for redirect, code in (("https://login.live.com/", "signed_out"),
+			("https://rewards.bing.com/terms-of-use", "terms_of_use"), (None, "page_blank")):
+			with self.subTest(code=code):
+				driver = SelectionDriver(second_redirect=redirect)
+				if redirect is None:
+					driver.blank_loads = {5}
+				state, _, attempts = self.observed_read(driver)
+				self.assertEqual(state.unreadable, code)
+				self.assertIsNone(rewards_state.worth_running(state, 15))
+				self.assert_whole_read(state, attempts, 2)
+
+	def test_single_read_records_attempt_one(self):
+		state, rows, attempts = self.observed_read(SelectionDriver(first="full"))
+		self.assertEqual(rows, [])
+		self.assertEqual(len(attempts), 1)
+		self.assert_whole_read(state, attempts, 1)
+
+	def test_real_state_record_identifies_kept_read_without_recording_discarded_values(self):
+		with tempfile.TemporaryDirectory() as folder, mock.patch("test_quest_only.QuestDriver", SelectionDriver):
+			result = record_run(folder, main.RunPlan(only_if_open=True), skipped=",".join(rewards_tasks.TASK_IDS))
+		before = next(event for event in result.events if event["type"] == "state" and event["phase"] == "before")
+		self.assertEqual(before["reader_attempt"], 1)
+		self.assertEqual(before["balance"], 1001)
+		self.assertEqual(before["unreadable"], "cards,quests")
+		self.assertEqual((before["edge_tile"], before["edge_minutes"], before["edge_target"]), (True, 5, 30))
+		self.assertTrue(next(event for event in result.events if event["type"] == "decision")["should_run"])
+		self.assertNotEqual(result.events[-1]["result"], "skipped")
 
 
 if __name__ == "__main__":
