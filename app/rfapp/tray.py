@@ -138,8 +138,10 @@ class Tray:
 				self._icon.update_menu()
 
 	def update(self, overview):
+		# Delivery may take the tray lock itself; never evaluate it while holding this lock.
+		notify.edge_reminder(overview)
 		with self._lock:
-			if all(self._overview.get(key) == overview.get(key) for key in ("accounts", "active_run", "last_run", "schedule")):
+			if all(self._overview.get(key) == overview.get(key) for key in ("accounts", "active_run", "last_run", "schedule", "edge_streak")):
 				return
 			self._overview = overview
 			last = overview.get("last_run") or {}
