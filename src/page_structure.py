@@ -1,4 +1,4 @@
-"""Value-free readiness evidence, once per account/run on a reader failure."""
+"""Value-free readiness evidence, at most two attempts per account/run."""
 from weakref import WeakKeyDictionary
 
 import run_record
@@ -32,6 +32,10 @@ def _count(value):
 
 def snapshot(driver):
 	packet = driver.execute_script(SNAPSHOT)
+	return _sanitize(packet)
+
+
+def _sanitize(packet):
 	if not isinstance(packet, dict):
 		raise ValueError("structure unavailable")
 	# Allowlist again before persistence; no text, numeric page values or URL
@@ -43,22 +47,43 @@ def snapshot(driver):
 		"matched": {key: _count(matched.get(key)) for key in _CODES}}
 
 
-def capture_once(driver, reason):
-	if reason not in ("page_blank", "balance"):
+def needs_reload(packet):
+	matched = packet["matched"]
+	return (all(packet[key] for key in ("complete", "rewards_host", "earn_path"))
+		and matched["earn_tab"] > 0 and not any(matched[key] for key in ("signin", "consent", "error"))
+		and any(matched[key] == 0 for key in ("cards", "quests", "breakdown", "header_figures")))
+
+
+def missing_sections(packet):
+	return ",".join(section for code, section in (("breakdown", "searches"), ("cards", "cards"),
+		("quests", "quests"), ("header_figures", "balance")) if packet["matched"][code] == 0)
+
+
+def capture_once(driver, reason, *, attempt=1, reloaded=False, packet=None):
+	if (type(attempt) is not int or attempt not in (1, 2) or not isinstance(reason, str) or not reason
+		or any(code not in ("page_blank", "signed_out", "terms_of_use", "searches", "daily_set", "cards", "quests", "balance") for code in reason.split(","))):
 		return
 	try:
 		recorder, account = run_record.current(), run_record._account.get()
-		if recorder is None or account is None or account in _captured.setdefault(recorder, set()):
+		if recorder is None or account is None:
 			return
-		_captured[recorder].add(account)
+		attempts = _captured.setdefault(recorder, {}).setdefault(account, set())
+		if attempt in attempts:
+			return
+		attempts.add(attempt)
+		fields = {"reason": reason, "attempt": attempt, "reloaded": reloaded is True}
 		try:
-			from rewards_tasks import _balance_command_deadline
-			import time
-			with _balance_command_deadline(driver, time.monotonic() + 2, time.monotonic):
-				packet = snapshot(driver)
-			run_record.emit("reader_structure", reason=reason, status="observed", **packet)
+			if reason in ("signed_out", "terms_of_use"):
+				# Do not inspect the stale/private redirect document as an earn page.
+				raise ValueError("earn document unavailable")
+			if packet is None:
+				from rewards_tasks import _balance_command_deadline
+				import time
+				with _balance_command_deadline(driver, time.monotonic() + 2, time.monotonic):
+					packet = snapshot(driver)
+			run_record.emit("reader_structure", **fields, status="observed", **_sanitize(packet))
 		except Exception:
-			run_record.emit("reader_structure", reason=reason, status="unavailable")
+			run_record.emit("reader_structure", **fields, status="unavailable")
 	except Exception:
 		# Diagnostics must not change the actual read outcome.
 		pass

@@ -227,12 +227,13 @@ class _PageStayedBlank(Exception):
 		self.code = code
 
 
-def _require_earn_page(driver, elements, timeout):
+def _require_earn_page(driver, elements, timeout, *, navigate=True, navigation_attempts=2):
 	# A blank SPA once lasted beyond 60s. A second navigation, not a longer
 	# wait on the same document, is the recovery the scheduled reader uses.
-	for _ in range(2):
+	for _ in range(navigation_attempts if navigate else 1):
 		try:
-			driver.get(EARN_URL)
+			if navigate:
+				driver.get(EARN_URL)
 		except TimeoutException:
 			# A page-load timeout can leave a usable DOM behind. Inspect it before
 			# discarding the attempt, and still retry if it never becomes usable.
@@ -269,7 +270,6 @@ def _require_earn_page(driver, elements, timeout):
 		code = "page_blank"
 
 	# Never accept terms or navigate to an activity to get around a redirect.
-	page_structure.capture_once(driver, code)
 	raise _PageStayedBlank(code)
 
 
@@ -369,6 +369,24 @@ def _quest_ready(driver, url):
 
 
 def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str] = frozenset(), *, phase: str = "before") -> RewardsState:
+	"""Keep the second read only, after at most one partial-render recovery."""
+	for attempt in (1, 2):
+		observed = []
+		state = _read_state_attempt(driver, elements, timeout, skip_cards, phase=phase, observed=observed, recovery=attempt == 2)
+		# Capture the earn document, not the quest page where a read can end.
+		packet = observed[-1] if observed else None
+		partial = packet if packet is not None and page_structure.needs_reload(packet) else None
+		reason = state.unreadable or (page_structure.missing_sections(partial) if partial else None)
+		if reason:
+			page_structure.capture_once(driver, reason, attempt=attempt, reloaded=attempt == 2, packet=packet)
+		if (attempt == 2 or partial is None
+			or state.unreadable and any(code in ("page_blank", "signed_out", "terms_of_use") for code in state.unreadable.split(","))):
+			return state
+		# The next attempt's initial _require_earn_page does the one recovery
+		# navigation. Never recurse or merge the first attempt's measurements.
+
+
+def _read_state_attempt(driver, elements, timeout, skip_cards, *, phase, observed, recovery):
 	"""Read every section independently; page failures become unreadable reasons.
 
 	unreadable is a whole-page code (signed_out, terms_of_use, page_blank),
@@ -377,14 +395,31 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 	card descriptions to skip from its own portable outcome store. By default
 	every open card counts, including cards a previous run could not complete.
 	"""
+	first_earn = True
+	def require_earn_page():
+		nonlocal first_earn
+		# A failed later navigation must not report an earlier document's facts.
+		observed.clear()
+		# Normal section navigations remain unchanged. Recovery adds exactly
+		# one /earn navigation, then reads the same document after panel close.
+		_require_earn_page(driver, elements, timeout, navigate=not recovery or first_earn,
+			navigation_attempts=1 if recovery else 2)
+		first_earn = False
+
+	def observe_earn_page():
+		try:
+			observed.append(page_structure.snapshot(driver))
+		except Exception:
+			# Missing diagnostic evidence is not permission to reload or to erase
+			# a real section reading. The partial event records unavailable.
+			pass
+
 	try:
-		_require_earn_page(driver, elements, timeout)
+		require_earn_page()
 	except _PageStayedBlank as exc:
-		page_structure.capture_once(driver, exc.code)
 		_streak_capture_once(driver, timeout, exc.code, phase=phase)
 		return RewardsState(unreadable=exc.code)
 	except Exception:
-		page_structure.capture_once(driver, "page_blank")
 		_streak_capture_once(driver, timeout, "page_blank", phase=phase)
 		return RewardsState(unreadable="page_blank")
 	_streak_capture_once(driver, timeout, phase=phase)
@@ -397,7 +432,6 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 		balance = _wait_for(lambda: read_balance(driver, elements), timeout)
 	except Exception:
 		unreadable.add("balance")
-		page_structure.capture_once(driver, "balance")
 
 	try:
 		driver.execute_script("arguments[0].click();", elements.get_points_breakdown_button())
@@ -408,9 +442,10 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 		unreadable.add("searches")
 	finally:
 		_close_sidebar(driver, elements)
+		observe_earn_page()
 
 	try:
-		_require_earn_page(driver, elements, timeout)
+		require_earn_page()
 		opener = _wait_for(elements.get_open_daily_set_button, timeout)
 		driver.execute_script("arguments[0].scrollIntoView({block:'center'});", opener)
 		time.sleep(1)
@@ -423,9 +458,10 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 		unreadable.add("daily_set")
 	finally:
 		_close_sidebar(driver, elements)
+		observe_earn_page()
 
 	try:
-		_require_earn_page(driver, elements, timeout)
+		require_earn_page()
 		cards = _wait_for(elements.get_all_misc_cards, timeout)
 		for card in cards:
 			try:
@@ -443,10 +479,16 @@ def read_state(driver, elements, timeout: float = 30, skip_cards: frozenset[str]
 		unreadable.add(exc.code)
 	except Exception:
 		unreadable.add("cards")
+	finally:
+		observe_earn_page()
 
 	try:
-		_require_earn_page(driver, elements, timeout)
-		urls = _wait_for(lambda: _quest_urls(driver, elements), timeout)
+		require_earn_page()
+		try:
+			urls = _wait_for(lambda: _quest_urls(driver, elements), timeout)
+		finally:
+			# Last normal earn wait, before any quest document replaces it.
+			observe_earn_page()
 		clicked = quest_steps.clicked_today()
 		not_counted = 0
 		for url in urls:
