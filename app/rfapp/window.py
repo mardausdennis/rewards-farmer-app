@@ -56,6 +56,8 @@ class _WebViewSleep:
 		generation = self._ready_generation
 		self.state = "checking_ready"
 		def check():
+			if not self._hidden or generation != self._ready_generation:
+				return
 			try:
 				core = self._window.native.webview.CoreWebView2
 				self._ready_checks += 1
@@ -98,15 +100,18 @@ class _WebViewSleep:
 		field.GetValue(control).IsVisible = visible
 
 	def suspend(self):
+		self._generation += 1
+		generation = self._generation
+		self._hidden = True
 		self.state = "pending"
 		def suspend():
+			if generation != self._generation or not self._hidden:
+				return
 			try:
 				if self._window.native.Visible:
+					self._hidden = False
 					self.state = "awake"
 					return
-				self._generation += 1
-				generation = self._generation
-				self._hidden = True
 				# Hiding the parent form alone leaves the native controller visible on WinForms.
 				self._visibility(False)
 				core = self._window.native.webview.CoreWebView2
@@ -116,8 +121,7 @@ class _WebViewSleep:
 					try:
 						if generation != self._generation or not self._hidden:
 							if not self._hidden:
-								core.Resume()
-								self._memory(core, "Normal")
+								self._resume_visible()
 							return
 						self.state = "suspended" if task.Result else "declined"
 						if not task.Result:
@@ -131,21 +135,27 @@ class _WebViewSleep:
 				_log.exception("Could not suspend the hidden WebView2")
 		self._invoke(suspend)
 
-	def resume(self):
-		def resume():
-			self._generation += 1
-			self._ready_generation += 1
-			self._hidden = False
+	def _resume_visible(self):
+		ok = True
+		# A failed resume or memory hint must not leave a separately hidden controller invisible.
+		for action, message in (
+			(lambda: self._window.native.webview.CoreWebView2.Resume(), "Could not resume WebView2"),
+			(lambda: self._memory(self._window.native.webview.CoreWebView2, "Normal"), "Could not reset WebView2 memory target"),
+			(lambda: self._visibility(True), "Could not restore WebView2 visibility"),
+		):
 			try:
-				core = self._window.native.webview.CoreWebView2
-				core.Resume()
-				self._memory(core, "Normal")
-				self._visibility(True)
-				self.state = "awake"
+				action()
 			except Exception:
-				self.state = "failed"
-				_log.exception("Could not resume WebView2")
-		self._invoke(resume)
+				ok = False
+				_log.exception(message)
+		self.state = "awake" if ok else "failed"
+
+	def resume(self):
+		# Invalidate queued hide/readiness actions when show is requested, not when Invoke runs later.
+		self._generation += 1
+		self._ready_generation += 1
+		self._hidden = False
+		self._invoke(self._resume_visible)
 
 
 class _ChangeWaiter:
@@ -240,16 +250,125 @@ def _reduced_motion():
 	return False
 
 
+_DEFAULT_SIZE = (1100, 760)
+_MIN_SIZE = (860, 600)
+_TITLEBAR_GRIP = (160, 32)
+
+
+def _dpi_scale():
+	if os.name != "nt":
+		return 1.0
+	user = ctypes.WinDLL("user32", use_last_error=True)
+	# pywebview creates its first handle on the primary monitor with system DPI awareness.
+	context = user.SetThreadDpiAwarenessContext
+	context.argtypes, context.restype = [ctypes.c_void_p], ctypes.c_void_p
+	previous = context(ctypes.c_void_p(-2))
+	try:
+		user.GetDpiForSystem.restype = wintypes.UINT
+		return (user.GetDpiForSystem() or 96) / 96
+	finally:
+		if previous:
+			context(previous)
+
+
+def _work_areas(scale=1.0):
+	if os.name != "nt":
+		return [(0, 0, 1920, 1080)]
+	user = ctypes.WinDLL("user32", use_last_error=True)
+	class MonitorInfo(ctypes.Structure):
+		_fields_ = [("size", wintypes.DWORD), ("monitor", wintypes.RECT), ("work", wintypes.RECT), ("flags", wintypes.DWORD)]
+	callback = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HANDLE, wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+	user.GetMonitorInfoW.argtypes, user.GetMonitorInfoW.restype = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)], wintypes.BOOL
+	user.EnumDisplayMonitors.argtypes, user.EnumDisplayMonitors.restype = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), callback, wintypes.LPARAM], wintypes.BOOL
+	user.SetThreadDpiAwarenessContext.argtypes, user.SetThreadDpiAwarenessContext.restype = [ctypes.c_void_p], ctypes.c_void_p
+	previous = user.SetThreadDpiAwarenessContext(ctypes.c_void_p(-2))
+	areas = []
+	def collect(monitor, dc, rect, data):
+		info = MonitorInfo(size=ctypes.sizeof(MonitorInfo))
+		if user.GetMonitorInfoW(monitor, ctypes.byref(info)):
+			work = info.work
+			area = tuple(int(value / scale) for value in (work.left, work.top, work.right - work.left, work.bottom - work.top))
+			if area[2] > 0 and area[3] > 0:
+				areas.append((not bool(info.flags & 1), area))
+		return True
+	try:
+		if not user.EnumDisplayMonitors(None, None, callback(collect), 0) or not areas:
+			raise ctypes.WinError(ctypes.get_last_error())
+	finally:
+		if previous:
+			user.SetThreadDpiAwarenessContext(previous)
+	return [area for primary, area in sorted(areas, key=lambda item: item[0])]
+
+
+def _titlebar_area(p, areas):
+	if any(type(p.get(key)) is not int for key in ("x", "y", "width", "height")) or p["width"] <= 0 or p["height"] <= 0:
+		return None
+	reachable = []
+	for area in areas:
+		x, y, width, height = area
+		overlap = min(p["x"] + p["width"], x + width) - max(p["x"], x)
+		if overlap >= min(_TITLEBAR_GRIP[0], p["width"], width) and y <= p["y"] and p["y"] + min(_TITLEBAR_GRIP[1], height) <= y + height:
+			reachable.append((x <= p["x"] < x + width, overlap, area))
+	return max(reachable, key=lambda item: item[:2])[2] if reachable else None
+
+
+def _window_geometry(stored, areas):
+	p = stored if isinstance(stored, dict) else {}
+	size = {key: p.get(key) if type(p.get(key)) is int and p[key] > 0 else default for key, default in zip(("width", "height"), _DEFAULT_SIZE)}
+	rect = {"x": p.get("x"), "y": p.get("y"), **size}
+	area = _titlebar_area(rect, areas)
+	if area is None:
+		area = areas[0]
+		size = dict(zip(("width", "height"), _DEFAULT_SIZE))
+	x, y, width, height = area
+	minimum = min(_MIN_SIZE[0], width), min(_MIN_SIZE[1], height)
+	w = min(width, max(minimum[0], size["width"]))
+	h = min(height, max(minimum[1], size["height"]))
+	if _titlebar_area(rect, [area]) is None:
+		left, top = x + (width - w) // 2, y + (height - h) // 2
+	else:
+		left, top = min(max(rect["x"], x), x + width - w), min(max(rect["y"], y), y + height - h)
+	return {"x": left, "y": top, "width": w, "height": h, "maximized": p.get("maximized") is True}, minimum
+
+
+def _native_geometry(native):
+	scale = float(native._scale) if hasattr(native, "_scale") else 1.0
+	state = str(native.WindowState)
+	bounds = native.RestoreBounds if state == "Maximized" else native.Bounds
+	return {"x": int(bounds.X / scale), "y": int(bounds.Y / scale), "width": int(bounds.Width / scale), "height": int(bounds.Height / scale), "maximized": state == "Maximized"}, scale
+
+
+def _recover_window(window):
+	from System.Drawing import Rectangle, Size
+	from System.Windows.Forms import FormWindowState
+	native = window.native
+	p, scale = _native_geometry(native)
+	geometry, minimum = _window_geometry(p, _work_areas(scale))
+	native.MinimumSize = Size(*(int(value * scale) for value in minimum))
+	if geometry != p:
+		maximized = p["maximized"]
+		if maximized:
+			native.WindowState = FormWindowState.Normal
+		native.Bounds = Rectangle(*(int(geometry[key] * scale) for key in ("x", "y", "width", "height")))
+		if maximized:
+			native.WindowState = FormWindowState.Maximized
+
+
 def _create_window(bridge, start_hidden=False, page=None):
 	import webview
 	p = bridge._module("prefs").load().get("window", {})
+	geometry, minimum = _window_geometry(p, _work_areas(_dpi_scale()))
+	if not isinstance(p, dict) or any(p.get(key) != value for key, value in geometry.items()):
+		try:
+			bridge._module("prefs").save({"window": {**(p if isinstance(p, dict) else {}), **geometry}})
+		except Exception:
+			_log.exception("Could not persist recovered window geometry")
 	window = webview.create_window(
 		title=bridge._module("i18n").current().t("shell.window.title"),
 		url=str(page if page is not None else paths.ui_dir() / "index.html"),
 		js_api=bridge,
-		width=p.get("width", 1100), height=p.get("height", 760),
-		x=p.get("x"), y=p.get("y"), maximized=p.get("maximized", False),
-		min_size=(860, 600), hidden=start_hidden,
+		**geometry,
+		min_size=minimum, hidden=start_hidden,
 		background_color="#0F0F0F" if _theme() == "dark" else "#FFFFFF",
 		text_select=True,
 	)
@@ -258,7 +377,6 @@ def _create_window(bridge, start_hidden=False, page=None):
 
 
 def _focus_window(window):
-	from System import Action
 	result = {}
 	def focus():
 		user = ctypes.WinDLL("user32", use_last_error=True)
@@ -282,7 +400,7 @@ def _focus_window(window):
 		finally:
 			if attached:
 				user.AttachThreadInput(current, foreground, False)
-	window.native.Invoke(Action(focus))
+	_on_ui(window, focus)
 	return result.get("accepted", False)
 
 
@@ -330,6 +448,7 @@ class _Runtime:
 		self._bridge._context_callback = self._refresh_context
 		self._bridge._schedule_callback = self._cache_schedule
 		self._bridge._ready_callback = self._on_ready
+		window.events.before_show += lambda: _recover_window(window)
 		window.events.closing += self._on_closing
 		window.events.closed += self._on_closed
 
@@ -677,9 +796,18 @@ class _Runtime:
 
 	def _save_window(self):
 		try:
-			native = self._window.native
-			maximized = str(native.WindowState) == "Maximized"
-			self._bridge._module("prefs").save({"window": {"width": self._window.width, "height": self._window.height, "x": self._window.x, "y": self._window.y, "maximized": maximized}})
+			def save():
+				native = self._window.native
+				if str(native.WindowState) == "Minimized":
+					return
+				p, scale = _native_geometry(native)
+				areas = _work_areas(scale)
+				if _titlebar_area(p, areas) is None:
+					return
+				geometry, minimum = _window_geometry(p, areas)
+				stored = self._bridge._module("prefs").load().get("window", {})
+				self._bridge._module("prefs").save({"window": {**(stored if isinstance(stored, dict) else {}), **geometry}})
+			_on_ui(self._window, save)
 		except Exception:
 			_log.exception("Could not save window geometry")
 
@@ -719,15 +847,28 @@ class _Runtime:
 		self._instance.close()
 
 	def show(self, route=None):
-		self._web_sleep.resume()
-		with self._condition:
-			self._visible = True
-			self._condition.notify_all()
-		self._window.restore()
-		# WinForms show() activates the native form, including a hidden tray window.
-		self._window.show()
-		if not _focus_window(self._window):
-			_log.warning("Windows declined foreground activation")
+		if self._quitting or self._stop.is_set():
+			return
+		# The second-launch event may arrive before pywebview has created the native form.
+		# Shown is signaled during creation; Invoke then runs after the hidden-start sequence ends.
+		if not self._window.events.shown.wait(15):
+			_log.warning("Window was not ready for the show request")
+			return
+		def show():
+			if self._quitting or self._stop.is_set():
+				return
+			self._web_sleep.resume()
+			if str(self._window.native.WindowState) == "Minimized":
+				self._window.restore()
+			_recover_window(self._window)
+			# Show and resume share one UI turn; no stale hide action can interleave them.
+			self._window.show()
+			with self._condition:
+				self._visible = True
+				self._condition.notify_all()
+			if not _focus_window(self._window):
+				_log.warning("Windows declined foreground activation")
+		_on_ui(self._window, show)
 		self._tray.opened()
 		self._wake_observer()
 		if route:

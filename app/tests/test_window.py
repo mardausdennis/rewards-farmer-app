@@ -419,10 +419,14 @@ class RuntimeTests(unittest.TestCase):
 		events = []
 		self.runtime._condition = threading.Condition()
 		self.runtime._window = Mock()
+		self.runtime._window.native.InvokeRequired = False
+		self.runtime._window.native.WindowState = "Minimized"
+		self.runtime._quitting = False
+		self.runtime._stop = threading.Event()
 		self.runtime._web_sleep.resume.side_effect = lambda: events.append("resume")
 		self.runtime._window.restore.side_effect = lambda: events.append("restore")
 		self.runtime._window.show.side_effect = lambda: events.append("show")
-		with patch.object(window, "_focus_window", side_effect=lambda win: events.append("focus") or True):
+		with patch.object(window, "_focus_window", side_effect=lambda win: events.append("focus") or True), patch.object(window, "_recover_window"):
 			self.runtime.show()
 		self.assertEqual(events, ["resume", "restore", "show", "focus"])
 		self.assertTrue(self.runtime._visible)

@@ -710,7 +710,7 @@ class WindowContractTests(unittest.TestCase):
 		webview = SimpleNamespace(create_window=Mock())
 		deps = {"prefs": SimpleNamespace(load=lambda: {"window": {"width": 1000, "height": 700, "x": 1, "y": 2, "maximized": True}}), "i18n": SimpleNamespace(current=lambda: SimpleNamespace(t=lambda key: "Localized"))}
 		api = Bridge(dependencies=deps)
-		with patch.dict(sys.modules, {"webview": webview}), patch.object(window, "_theme", return_value="dark"):
+		with patch.dict(sys.modules, {"webview": webview}), patch.object(window, "_theme", return_value="dark"), patch.object(window, "_dpi_scale", return_value=1.0), patch.object(window, "_work_areas", return_value=[(0, 0, 1920, 1040)]):
 			window._create_window(api, True, Path("scratch.html"))
 		options = webview.create_window.call_args.kwargs
 		self.assertEqual(options["url"], "scratch.html")
@@ -758,20 +758,24 @@ class WindowContractTests(unittest.TestCase):
 		runtime._bridge = api
 		runtime._window = Mock(width=1100, height=760, x=20, y=30)
 		runtime._window.native.WindowState = "Normal"
+		runtime._window.native.InvokeRequired = False
+		runtime._window.native._scale = 1.0
+		runtime._window.native.Bounds = SimpleNamespace(X=20, Y=30, Width=1100, Height=760)
 		runtime._quitting = False
 		runtime._condition = threading.Condition()
 		runtime._web_sleep = Mock()
 		runtime._change_waiter = None
 		runtime._cleanup = Mock()
-		with patch("rfapp.notify.toast", return_value=True) as toast:
+		with patch("rfapp.notify.toast", return_value=True) as toast, patch.object(window, "_work_areas", return_value=[(0, 0, 1920, 1040)]):
 			self.assertFalse(runtime._on_closing())
 			self.assertFalse(runtime._on_closing())
 			toast.assert_called_once()
 		self.assertTrue(p["tray_hint_shown"])
 		self.assertEqual(p["window"]["width"], 1100)
 		runtime._cleanup.assert_not_called()
-		runtime.quit()
-		runtime.quit()
+		with patch.object(window, "_work_areas", return_value=[(0, 0, 1920, 1040)]):
+			runtime.quit()
+			runtime.quit()
 		runtime._cleanup.assert_called_once()
 		runtime._window.destroy.assert_called_once()
 		self.assertFalse(api._stop_threads)
