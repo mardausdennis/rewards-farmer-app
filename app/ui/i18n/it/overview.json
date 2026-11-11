@@ -1,6 +1,7 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.edge_streak.minutes": {"text": "Navigazione in Edge oggi: {minutes} minuti su {target}", "src": "db0d3407", "note": "Overview progress line for this account today. {minutes} and {target} are formatted counted and target minutes. Keep each placeholder once. Short status line; allow wrapping, no fixed character limit."},
     "overview.account.all": {"text": "Tutti gli account", "src": "e1cce800"},
     "overview.account.open": {"text": "Apri {account}", "src": "1e126529"},
     "overview.streaks.unknown": {"text": "Serie sconosciute", "src": "2e704ef8"},

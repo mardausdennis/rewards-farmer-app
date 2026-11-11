@@ -1,6 +1,7 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.edge_streak.minutes": {"text": "今日の Edge 閲覧: {target} 分中 {minutes} 分", "src": "db0d3407", "note": "Overview progress line for this account today. {minutes} and {target} are formatted counted and target minutes. Keep each placeholder once. Short status line; allow wrapping, no fixed character limit."},
     "overview.account.all": {"text": "すべてのアカウント", "src": "e1cce800"},
     "overview.account.open": {"text": "{account} を開く", "src": "1e126529"},
     "overview.streaks.unknown": {"text": "連続記録は不明です", "src": "2e704ef8"},

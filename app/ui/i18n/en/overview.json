@@ -1,6 +1,7 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.edge_streak.minutes": {"text": "Edge browsing today: {minutes} of {target} minutes", "note": "Overview progress line for this account's Edge browsing streak today. {minutes} and {target} are formatted counted and target minutes. Keep each placeholder once. Short status line; allow wrapping, no fixed character limit."},
     "overview.account.all": {"text": "All accounts", "note": "Backend totals and separate streak captures for each real account."},
     "overview.account.open": {"text": "Open {account}", "note": "Opens this account's Overview. account is its app label."},
     "overview.streaks.unknown": {"text": "Streaks unknown", "note": "No streak capture exists for this account. Never borrow another account's capture."},

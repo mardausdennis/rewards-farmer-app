@@ -1,6 +1,7 @@
 {
   "namespace": "overview",
   "messages": {
+    "overview.edge_streak.minutes": {"text": "今日 Edge 浏览：{minutes} 分钟，目标 {target} 分钟", "src": "db0d3407", "note": "Overview progress line for this account today. {minutes} and {target} are formatted counted and target minutes. Keep each placeholder once. Short status line; allow wrapping, no fixed character limit."},
     "overview.account.all": {"text": "所有帐户", "src": "e1cce800"},
     "overview.account.open": {"text": "打开 {account}", "src": "1e126529"},
     "overview.streaks.unknown": {"text": "连续记录未知", "src": "2e704ef8"},

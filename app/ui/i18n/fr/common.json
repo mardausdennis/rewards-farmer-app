@@ -1,6 +1,12 @@
 {
   "namespace": "common",
   "messages": {
+    "common.edge_browsing.result": {"text": "Navigation dans Edge\u00a0: {before} → {after} minutes sur {target}, {outcome}", "src": "1a80057b", "note": "Shared History/Live Edge browsing result. {before}, {after} and {target} are formatted minute readings and target; {outcome} is a localized common.edge_browsing.outcome fragment. Keep each placeholder once. Concise status line; allow wrapping, no fixed character limit."},
+    "common.edge_browsing.outcome.complete": {"text": "terminée", "src": "0a17903f", "note": "History/Live result outcome: completed. Inserted mid-sentence; lowercase where applicable. No placeholders or terminal punctuation. Keep short."},
+    "common.edge_browsing.outcome.incomplete": {"text": "non terminée", "src": "0469f31c", "note": "History/Live result outcome: not completed. Inserted mid-sentence; lowercase where applicable. No placeholders or terminal punctuation. Keep short."},
+    "common.edge_browsing.outcome.not_available": {"text": "indisponible", "src": "3f32146f", "note": "History/Live result outcome: not available, never completed or zero. Inserted mid-sentence; lowercase where applicable. No placeholders or terminal punctuation. Keep short."},
+    "common.edge_browsing.outcome.stopped": {"text": "arrêtée", "src": "9299b6a8", "note": "History/Live result outcome: stopped. Inserted mid-sentence; lowercase where applicable. No placeholders or terminal punctuation. Keep short."},
+    "common.edge_browsing.outcome.error": {"text": "en échec", "src": "109921b1", "note": "History/Live result outcome: failed. Inserted mid-sentence; lowercase where applicable. No placeholders or terminal punctuation. Keep short."},
     "common.action.cancel": {"text": "Annuler", "src": "b1dc4db4"},
     "common.action.save": {"text": "Enregistrer", "src": "10d8ac96"},
     "common.action.dismiss": {"text": "Fermer", "src": "719ec514"},

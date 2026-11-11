@@ -263,6 +263,34 @@ class CatalogTests(unittest.TestCase):
 					if key == "settings.run.edge_streak.help":
 						self.assertIn("35", entry["text"])
 
+	def test_edge_browsing_display_catalogs(self):
+		expected = {
+			"overview.edge_streak.minutes": "Edge browsing today: {minutes} of {target} minutes",
+			"common.edge_browsing.result": "Edge browsing: {before} → {after} of {target} minutes, {outcome}",
+			"common.edge_browsing.outcome.complete": "completed",
+			"common.edge_browsing.outcome.incomplete": "not completed",
+			"common.edge_browsing.outcome.not_available": "not available",
+			"common.edge_browsing.outcome.stopped": "stopped",
+			"common.edge_browsing.outcome.error": "failed",
+		}
+		locales = _json(CATALOG_ROOT / "index.json")["locales"]
+		for key, text in expected.items():
+			namespace = key.split(".")[0]
+			source = _json(CATALOG_ROOT / "en" / f"{namespace}.json")["messages"][key]
+			self.assertEqual(text, source["text"])
+			for locale in locales:
+				code = locale["code"]
+				with self.subTest(key=key, locale=code):
+					entry = _json(CATALOG_ROOT / code / f"{namespace}.json")["messages"][key]
+					self.assertTrue(entry["note"].strip())
+					self.assertEqual(sorted(PLACEHOLDER.findall(text)), sorted(PLACEHOLDER.findall(entry["text"])))
+					if code != "en":
+						self.assertEqual(source_hash(source), entry["src"])
+						self.assertNotEqual(text, entry["text"])
+					if key.startswith("common.edge_browsing.outcome."):
+						self.assertEqual(entry["text"].lower(), entry["text"])
+						self.assertNotRegex(entry["text"], r"[.!?。！？]$")
+
 	def test_risk_notice_preserves_the_frozen_source(self):
 		path = CATALOG_ROOT / "en" / "common.json"
 		if not path.is_file():

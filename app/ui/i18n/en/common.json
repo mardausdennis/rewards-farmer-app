@@ -1,6 +1,12 @@
 {
   "namespace": "common",
   "messages": {
+    "common.edge_browsing.result": {"text": "Edge browsing: {before} → {after} of {target} minutes, {outcome}", "note": "Shared History and Live run result line for Edge browsing. {before} and {after} are formatted minute readings before and after this attempt; {target} is the formatted target; {outcome} is a localized common.edge_browsing.outcome value. Keep each placeholder once. Concise status line; allow wrapping, no fixed character limit."},
+    "common.edge_browsing.outcome.complete": {"text": "completed", "note": "Completed Edge browsing outcome inserted mid-sentence in the shared History/Live result line. No placeholders. Short lowercase fragment; no terminal punctuation."},
+    "common.edge_browsing.outcome.incomplete": {"text": "not completed", "note": "Incomplete Edge browsing outcome inserted mid-sentence in the shared History/Live result line. No placeholders. Short lowercase fragment; no terminal punctuation."},
+    "common.edge_browsing.outcome.not_available": {"text": "not available", "note": "Unavailable Edge browsing outcome inserted mid-sentence in the shared History/Live result line. No placeholders. Short lowercase fragment; no terminal punctuation. Unavailable does not mean completed or zero."},
+    "common.edge_browsing.outcome.stopped": {"text": "stopped", "note": "Stopped Edge browsing outcome inserted mid-sentence in the shared History/Live result line. No placeholders. Short lowercase fragment; no terminal punctuation."},
+    "common.edge_browsing.outcome.error": {"text": "failed", "note": "Failed Edge browsing outcome inserted mid-sentence in the shared History/Live result line. No placeholders. Short lowercase fragment; no terminal punctuation."},
     "common.action.cancel": {"text":"Cancel","note":"Dismiss an edit or dialog without saving; short button label."},
     "common.action.save": {"text":"Save","note":"Save the current edit; short button label."},
     "common.action.dismiss": {"text":"Dismiss","note":"Accessible label for the close control on a notification."},
