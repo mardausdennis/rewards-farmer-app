@@ -435,6 +435,38 @@ class AccountsAdminTests(unittest.TestCase):
 		signin._write_status("account-1", "signed_in")
 		self.assertTrue(admin._list_accounts()[0]["signed_in"])
 
+	def test_resignin_supersedes_old_signed_out_run_without_erasing_balance(self):
+		from run_record import append_event
+		self.accounts(["account-1"])
+		path = self.root / "runs" / "20261014T100000Z-abcd.jsonl"
+		path.parent.mkdir()
+		append_event(str(path), "account_start", "20261014T100000Z-abcd", account="account-1", profile=str(self.profiles / "account-1"))
+		append_event(str(path), "state", "20261014T100000Z-abcd", account="account-1", balance=10, unreadable="signed_out")
+		signin._write_status("account-1", "signed_in")
+		row = admin._list_accounts()[0]
+		self.assertTrue(row["signed_in"])
+		self.assertEqual(row["balance"], 10)
+
+	def test_newer_signed_out_run_is_not_hidden_by_older_successful_signin(self):
+		from run_record import append_event
+		self.accounts(["account-1"])
+		status = signin._write_status("account-1", "signed_in")
+		status["at"] = "2020-01-01T00:00:00Z"
+		signin._status_path("account-1").write_text(json.dumps(status))
+		path = self.root / "runs" / "20261014T100000Z-abcd.jsonl"
+		append_event(str(path), "account_start", "20261014T100000Z-abcd", account="account-1", profile=str(self.profiles / "account-1"))
+		append_event(str(path), "state", "20261014T100000Z-abcd", account="account-1", unreadable="signed_out")
+		self.assertFalse(admin._list_accounts()[0]["signed_in"])
+
+	def test_same_account_resignin_does_not_enter_new_account_enrollment_or_migration(self):
+		self.accounts(["account-1"])
+		(self.root / "account-migration.json").write_text('{"v":1}')
+		with patch.object(admin, "_start_signin", return_value={"account_id":"account-1", "state":"starting"}) as start:
+			self.assertEqual(admin.sign_in_again("account-1")["signin"]["state"], "starting")
+		start.assert_called_once_with("account-1", False)
+		self.assertTrue((self.profiles / "account-1").is_dir())
+		self.assertEqual(settings.active_accounts(), ["account-1"])
+
 	def test_root_removal_surviving_local_state_preserves_settings(self):
 		self.root_tree()
 		self.status.return_value = None

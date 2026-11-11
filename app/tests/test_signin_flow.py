@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+import page_structure
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
@@ -28,6 +29,8 @@ class FakeDriver:
 		self.quit_count = 0
 		self.visits = []
 		self.limit = None
+		self.structure = {"complete": True, "rewards_host": True, "earn_path": False, "rendered": False, "counts": {}, "matched": {}}
+		self.auth = {"complete": True, "identity": False, "profile": False, "signin": False}
 
 	@property
 	def current_url(self):
@@ -43,6 +46,9 @@ class FakeDriver:
 
 	def quit(self):
 		self.quit_count += 1
+
+	def execute_script(self, script):
+		return self.structure if "shadow_roots" in script else self.auth
 
 
 class SigninFlowTests(unittest.TestCase):
@@ -179,21 +185,26 @@ class SigninFlowTests(unittest.TestCase):
 
 	def test_closed_after_unobserved_success_preserves_session(self):
 		self.visible.closed = True
+		self.verification.url = "https://rewards.bing.com/"
+		self.verification.auth["profile"] = True
 		self.rewards.read_state.return_value = SimpleNamespace(unreadable=None)
 		self.assertEqual(signin.run("account-1", True), 0)
 		self.assertEqual(self.state()["state"], "signed_in")
 		self.assertIn("REWARDS_ACCOUNTS=account-1", (self.root / ".env").read_text())
 		self.admin._recycle.assert_not_called()
 
-	def test_terms_of_use_retains_account_with_error_code(self):
+	def test_terms_of_use_retains_profile_without_admitting_account(self):
 		self.visible.closed = True
 		self.rewards.read_state.return_value = SimpleNamespace(unreadable="terms_of_use")
-		self.assertEqual(signin.run("account-1", True), 0)
+		self.assertEqual(signin.run("account-1", True), 1)
 		self.assertEqual(self.state()["error_code"], "terms_of_use")
 		self.assertEqual(self.state()["message_key"], "errors.state.terms_of_use")
+		self.assertNotEqual(self.state()["state"], "signed_in")
+		self.admin._recycle.assert_not_called()
 
 	def test_timeout_verifies_then_recycles_new_signed_out_profile(self):
 		self.rewards.read_balance.return_value = None
+		self.visible.auth["signin"] = True
 		profile = self.profile / "account-1"
 		profile.mkdir()
 		self.assertEqual(signin.run("account-1", True), 1)
@@ -204,6 +215,9 @@ class SigninFlowTests(unittest.TestCase):
 
 	def test_timeout_good_session_is_kept(self):
 		self.rewards.read_balance.return_value = None
+		self.visible.auth["signin"] = True
+		self.verification.url = "https://rewards.bing.com/"
+		self.verification.auth["profile"] = True
 		self.rewards.read_state.return_value = SimpleNamespace(unreadable="page_blank")
 		self.assertEqual(signin.run("account-1", True), 0)
 		self.assertEqual(self.state()["state"], "signed_in")
@@ -211,6 +225,7 @@ class SigninFlowTests(unittest.TestCase):
 
 	def test_other_hosts_never_read_balance(self):
 		self.visible.url = "https://login.live.com/"
+		self.verification.url = "https://login.live.com/"
 		self.assertEqual(signin.run("account-1", False), 1)
 		self.rewards.read_balance.assert_not_called()
 		self.rewards.read_state.assert_called_once()

@@ -414,6 +414,7 @@ def _list_accounts() -> list[dict]:
 				if "signed_in" not in row:
 					code = event.get("unreadable")
 					row["signed_in"] = None if code == "page_blank" else code != "signed_out"
+					row["signin_at"] = event.get("ts")
 				if event.get("balance") is not None and "balance" not in row:
 					row["balance"], row["balance_at"] = event["balance"], event.get("ts")
 			if event.get("type") == "identity_check" and "identity_last_status" not in row:
@@ -422,9 +423,17 @@ def _list_accounts() -> list[dict]:
 	import identity
 	for number, account_id in enumerate([*active, *paused], 1):
 		row = observed.get(account_id, {})
-		if "signed_in" not in row and (runs / f"signin-{account_id.replace('@', '')}.json").is_file():
+		if (runs / f"signin-{account_id.replace('@', '')}.json").is_file():
 			try:
-				if _signin_status(account_id)["state"] == "signed_in":
+				status = _signin_status(account_id)
+				def stamp(value):
+					try:
+						return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+					except (AttributeError, TypeError, ValueError, OverflowError):
+						return 0
+				# A successful re-sign-in is newer evidence than a run which
+				# prompted it. Keep the last balance and let later runs win again.
+				if status["state"] == "signed_in" and ("signed_in" not in row or stamp(status["at"]) > stamp(row.get("signin_at"))):
 					row["signed_in"] = True
 			except ValueError:
 				pass

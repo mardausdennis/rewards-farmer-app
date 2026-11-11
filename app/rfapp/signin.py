@@ -18,6 +18,80 @@ from rfapp.envfile import EnvFile
 
 _logger = logging.getLogger("rfapp")
 
+_SIGNIN_SIGNALS = r"""
+const visible = node => {
+	const r = node.getBoundingClientRect(), s = getComputedStyle(node);
+	return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'
+		&& s.opacity !== '0' && !node.closest('[hidden], [aria-hidden="true"]');
+};
+const identity = [...document.querySelectorAll('p.pii')].some(node => visible(node) && (node.innerText || '').trim());
+const profile = [...document.querySelectorAll('header button, header [role="button"]')].some(node =>
+	visible(node) && /^(view profile|my account)$/i.test((node.getAttribute('aria-label') || '').trim()));
+const signin = [...document.querySelectorAll('a[href], form[action], button, [role="button"]')].some(node => {
+	if (!visible(node)) return false;
+	const label = (node.getAttribute('aria-label') || node.innerText || '').trim();
+	if (/^(sign in|log in|anmelden|se connecter|iniciar sesi[oó]n|accedi|entrar|ログイン|サインイン|登录|登入|تسجيل الدخول)$/i.test(label)) return true;
+	const target = node.getAttribute('href') || node.getAttribute('action');
+	if (!target) return false;
+	try {
+		const u = new URL(target, window.location.href);
+		return ['login.live.com', 'login.microsoftonline.com'].includes(u.hostname)
+			|| (u.hostname === 'rewards.bing.com' && /^\/(signin|login)(\/|$)/i.test(u.pathname));
+	} catch (_) { return false; }
+});
+return {complete: true, identity, profile, signin};
+"""
+
+
+def _structure(driver) -> dict:
+	from page_structure import snapshot
+	try:
+		return snapshot(driver)
+	except Exception:
+		return {}
+
+
+def _detection(driver, rewards_state, elements) -> tuple[str, dict]:
+	try:
+		url = urlsplit(driver.current_url)
+	except Exception:
+		return "closed", {}
+	if any(part in url.path.casefold() for part in ("/terms", "/tou", "/consent")):
+		return "terms_of_use", _structure(driver)
+	if url.scheme != "https" or url.hostname != "rewards.bing.com" or url.username or url.password or url.port not in (None, 443):
+		return "signed_out", {}
+	if url.path.casefold().rstrip("/") in ("/signin", "/login"):
+		return "signed_out", _structure(driver)
+	try:
+		value = driver.execute_script(_SIGNIN_SIGNALS)
+		auth = {key: value.get(key) is True for key in ("complete", "identity", "profile", "signin")} if isinstance(value, dict) else {}
+	except Exception:
+		auth = {}
+	structure = _structure(driver)
+	matched = structure.get("matched", {})
+	if auth.get("signin") or matched.get("signin", 0):
+		return "signed_out", structure
+	if matched.get("consent", 0) or matched.get("error", 0):
+		return "unknown", structure
+	if not auth.get("complete"):
+		return "unknown", structure
+	try:
+		balance = rewards_state.read_balance(driver, elements)
+	except Exception:
+		balance = None
+	if balance is not None or auth.get("identity") or auth.get("profile") or structure.get("earn_path") and structure.get("rendered"):
+		return "signed_in", structure
+	return "unknown", structure
+
+
+def _record_structure(phase: str, structure: dict, reason: str) -> dict:
+	from page_structure import _sanitize
+	value = {"phase": phase, "reason": reason, "status": "observed" if structure else "unavailable", "structure": _sanitize(structure)}
+	_logger.warning("signin_detection %s", json.dumps(value, sort_keys=True))
+	# Sign-in has no run Recorder. Persist this packet in its owned status file
+	# rather than relying on a no-op run_record.emit or transient console output.
+	return value
+
 
 def _status_path(account_id: str) -> Path:
 	return paths.runs_dir() / f"signin-{account_id.replace('@', '')}.json"
@@ -27,11 +101,13 @@ def _cancel_path(account_id: str) -> Path:
 	return paths.runs_dir() / f"signin-{account_id.replace('@', '')}.cancel"
 
 
-def _write_status(account_id: str, state: str, error_code: str | None = None, detail: str | None = None, pid: int | None = None, invitation=None) -> dict:
-	message = f"errors.browser.{error_code}" if state == "failed" and error_code not in (None, "crashed") else f"accounts.signin.{state}"
+def _write_status(account_id: str, state: str, error_code: str | None = None, detail: str | None = None, pid: int | None = None, invitation=None, diagnostic=None) -> dict:
+	message = f"errors.browser.{error_code}" if state == "failed" and error_code not in (None, "crashed", "page_unrecognized") else f"accounts.signin.{state}"
 	if error_code == "terms_of_use":
 		message = "errors.state.terms_of_use"
 	value = {"account_id": account_id, "state": state, "error_code": error_code, "message_key": message, "detail": detail, "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"), "pid": os.getpid() if pid is None else pid}
+	if diagnostic is not None:
+		value["diagnostic"] = diagnostic
 	if invitation is not None:
 		value["invitation"] = {key: invitation.get(key) for key in ("operation_id", "phase", "source_account_id", "target_account_id", "continue_token", "referral_status", "can_resume", "can_discard")}
 		if state in ("invite_waiting", "invite_interrupted"):
@@ -192,6 +268,8 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 	error_code = None
 	detail = None
 	observed_name = None
+	diagnostic = None
+	keep_profile = False
 	try:
 		_write_status(account_id, "starting")
 		if new and ((root / "Local State").is_file() and "@root" in settings.active_accounts() or (paths.data_home() / "account-migration.json").exists()):
@@ -208,25 +286,36 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 			deadline = time.monotonic() + 15 * 60
 			closed = False
 			verify = True
+			unknown_since = None
+			terms_visible = False
 			while time.monotonic() < deadline:
 				if _cancel_path(account_id).exists():
 					state, verify = "cancelled", False
 					break
-				try:
-					url = visible.current_url
-				except Exception:
+				observed, structure = _detection(visible, rewards_state, element_selectors.ElementSelectionUtils(visible))
+				if (observed == "terms_of_use") != terms_visible:
+					terms_visible = observed == "terms_of_use"
+					_write_status(account_id, "waiting", "terms_of_use" if terms_visible else None)
+				if observed == "closed":
 					closed = True
 					break
-				if urlsplit(url).hostname == "rewards.bing.com":
-					balance = rewards_state.read_balance(visible, element_selectors.ElementSelectionUtils(visible))
-					if balance is not None:
-						if enroll:
-							candidate = accounts_admin._profile_identity(account_id).get("name")
-							matched, _ = identity.read_dashboard_identity(visible, candidate)
-							observed_name = candidate if matched == "match" else None
-						time.sleep(3)
-						state, verify = "signed_in", False
+				if observed == "signed_in":
+					if enroll:
+						candidate = accounts_admin._profile_identity(account_id).get("name")
+						matched, _ = identity.read_dashboard_identity(visible, candidate)
+						observed_name = candidate if matched == "match" else None
+					time.sleep(3)
+					state, verify = ("cancelled" if _cancel_path(account_id).exists() else "signed_in"), False
+					break
+				if observed == "unknown":
+					unknown_since = time.monotonic() if unknown_since is None else unknown_since
+					# An unrecognised Rewards page should not leave the person at
+					# "Finish signing in" for the whole interactive login timeout.
+					if time.monotonic() - unknown_since >= 30:
+						diagnostic = _record_structure("visible", structure, "page_unrecognized")
 						break
+				else:
+					unknown_since = None
 				time.sleep(2)
 			_quit(visible)
 			visible = None
@@ -237,16 +326,24 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 					options.add_argument("--headless=new")
 					verification = webdriver.Edge(options=options, service=browser.build_service())
 					verification.set_page_load_timeout(60)
-					snapshot = rewards_state.read_state(verification, element_selectors.ElementSelectionUtils(verification))
-					if snapshot.unreadable == "signed_out":
+					snapshot = rewards_state.read_state(verification, element_selectors.ElementSelectionUtils(verification), timeout=0)
+					observed, structure = _detection(verification, rewards_state, element_selectors.ElementSelectionUtils(verification))
+					if _cancel_path(account_id).exists():
+						state = "cancelled"
+					elif snapshot.unreadable == "terms_of_use" or observed == "terms_of_use":
+						state, error_code, keep_profile = "failed", "terms_of_use", True
+						diagnostic = _record_structure("verification", structure, "terms_of_use")
+					elif snapshot.unreadable == "signed_out" or observed == "signed_out":
 						state = "cancelled" if closed else "timed_out"
-					else:
+					elif observed == "signed_in":
 						state = "signed_in"
-						error_code = "terms_of_use" if snapshot.unreadable == "terms_of_use" else None
 						if enroll:
 							candidate = accounts_admin._profile_identity(account_id).get("name")
 							matched, _ = identity.read_dashboard_identity(verification, candidate)
 							observed_name = candidate if matched == "match" else None
+					else:
+						state, error_code, keep_profile = "failed", "page_unrecognized", True
+						diagnostic = _record_structure("verification", structure, "page_unrecognized")
 				except WebDriverException as exc:
 					state, error_code, detail = "failed", browser.start_failure_code(exc), type(exc).__name__
 				finally:
@@ -277,11 +374,11 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 		_quit(visible)
 		_quit(verification)
 		try:
-			if new and not session_saved and state in ("failed", "cancelled", "timed_out") and profile.exists():
+			if new and not session_saved and not keep_profile and state in ("failed", "cancelled", "timed_out") and profile.exists():
 				if not accounts_admin._recycle([profile]):
 					_logger.warning("Sign-in profile could not be recycled: %s", profile)
 					detail = (detail + "; " if detail else "") + f"Profile data could not be recycled: {profile}"
-			_write_status(account_id, state, error_code, detail)
+			_write_status(account_id, state, error_code, detail, diagnostic=diagnostic)
 			_cancel_path(account_id).unlink(missing_ok=True)
 		finally:
 			lock.release()
