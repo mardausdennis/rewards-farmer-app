@@ -16,6 +16,7 @@ import browser
 import desktop_utils
 import rewards_tasks
 import rewards_state
+import edge_browsing_streak
 import referrals
 import identity
 import element_selectors
@@ -41,6 +42,7 @@ class RunPlan:
 	min_points: int | None = None
 	run_if_unreadable: bool = False
 	require_identity: bool = False
+	edge_topup: bool = False
 
 
 _plan = RunPlan()
@@ -58,18 +60,29 @@ def decision_state(state: rewards_state.RewardsState) -> rewards_state.RewardsSt
 	return dataclasses.replace(state, unreadable=",".join(sections) or None)
 
 
+def edge_pending(state, plan) -> bool:
+	return (plan.edge_topup and state.edge_tile
+		and state.edge_minutes is not None and state.edge_target is not None
+		and 0 <= state.edge_minutes < state.edge_target)
+
+
 def decide(state, plan) -> tuple[bool, str]:
 	worth = rewards_state.worth_running(decision_state(state), plan.min_points)
-	if worth is None:
-		return (True, "unreadable_run_anyway") if plan.run_if_unreadable else (False, "unreadable")
 	if worth:
 		return True, ("enough_open" if state.open_points >= plan.min_points else "quest_unlocked")
+	# Known Edge work can survive a partial read, but not a whole-page failure.
+	if edge_pending(state, plan) and not any(code in WHOLE_PAGE_CODES for code in (state.unreadable or "").split(",")):
+		return True, "edge_topup"
+	if worth is None:
+		return (True, "unreadable_run_anyway") if plan.run_if_unreadable else (False, "unreadable")
 	return False, ("below_threshold" if state.open_points > 0 else "nothing_open")
 
 
 def _decision_log(account, state, reason):
 	if reason == "quest_unlocked":
 		logger.info("%s: a quest step is unlocked, running", account.name)
+	elif reason == "edge_topup":
+		logger.info("%s: Edge browsing minutes %s/%s, running", account.name, state.edge_minutes, state.edge_target)
 	elif reason in ("enough_open", "unreadable_run_anyway"):
 		logger.info("%s: about %s points open, running", account.name, state.open_points)
 	elif reason == "below_threshold":
@@ -164,7 +177,13 @@ def run_account(account: accounts.Account) -> bool:
 					return True
 				if reason == "quest_unlocked":
 					only = {"quests"}
-					logger.info("%s: running quests only because a quest step is unlocked", account.name)
+					if edge_pending(state, _plan):
+						only.add("edge_browsing")
+						logger.info("%s: running quests and Edge browsing because both are open", account.name)
+					else:
+						logger.info("%s: running quests only because a quest step is unlocked", account.name)
+				elif reason == "edge_topup":
+					only = {"edge_browsing"}
 		rewards = rewards_tasks.RewardsTaskUtils(driver)
 		if _plan.read_state:
 			rewards.balance_reader = lambda: rewards_state.read_balance(driver, rewards.elements)
@@ -202,7 +221,8 @@ def main(unattended: bool = False, plan: RunPlan | None = None) -> int:
 	global _plan, _stop_requested, _account_started, _account_ran, _identity_failures, _identity_matches
 	_plan = plan or RunPlan()
 	_plan = dataclasses.replace(_plan, read_state=_plan.read_state or _plan.only_if_open or _plan.check_only,
-		min_points=(_plan.min_points if _plan.min_points is not None else int(os.environ.get(MIN_POINTS_ENV, DEFAULT_MIN_POINTS))) if _plan.only_if_open else _plan.min_points)
+		min_points=(_plan.min_points if _plan.min_points is not None else int(os.environ.get(MIN_POINTS_ENV, DEFAULT_MIN_POINTS))) if _plan.only_if_open else _plan.min_points,
+		edge_topup=edge_browsing_streak.enabled())
 	_stop_requested = False
 	_identity_failures = 0
 	_identity_matches = 0

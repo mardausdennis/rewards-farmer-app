@@ -24,6 +24,7 @@ from element_selectors import ElementNotReady
 import run_record
 import quest_steps
 import page_structure
+import edge_browsing_streak
 
 EARN_URL = "https://rewards.bing.com/earn"
 DAILY_SET_POINTS = 10
@@ -160,6 +161,9 @@ class RewardsState:
 	unreadable: str | None = None
 	open_points: int = 0
 	earned_today: int | None = None
+	edge_tile: bool = False
+	edge_minutes: int | None = None
+	edge_target: int | None = None
 
 
 def worth_running(state: RewardsState, threshold: int) -> bool | None:
@@ -424,6 +428,17 @@ def _read_state_attempt(driver, elements, timeout, skip_cards, *, phase, observe
 		return RewardsState(unreadable="page_blank")
 	_streak_capture_once(driver, timeout, phase=phase)
 
+	edge_tile = False
+	edge_minutes = edge_target = None
+	try:
+		edge_browsing_streak.find_tile(driver)
+		edge_tile = True
+		edge_minutes, edge_target = edge_browsing_streak.read_minutes(driver)
+	except Exception:
+		# A known tile with an unreadable counter stays present, never zero.
+		# Read it before panels or quest navigation replace the earn document.
+		pass
+
 	balance = searches_earned = searches_max = earned_today = None
 	daily_set_open = cards_open = quests_open = open_points = 0
 	unreadable = set()
@@ -523,4 +538,5 @@ def _read_state_attempt(driver, elements, timeout, skip_cards, *, phase, observe
 		daily_set_open=daily_set_open, cards_open=cards_open, quests_open=quests_open,
 		unreadable=whole_page or section_codes or None, open_points=open_points,
 		earned_today=earned_today,
+		edge_tile=edge_tile, edge_minutes=edge_minutes, edge_target=edge_target,
 	)
