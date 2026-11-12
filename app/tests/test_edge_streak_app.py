@@ -234,6 +234,8 @@ class EdgeSupervisorTests(unittest.TestCase):
 
 	def evening_env(self, chosen=None):
 		self.settings.update({**settings._DEFAULTS,"run.edge_streak":"fill"})
+		if chosen is not None:
+			self.settings["run.browser_mode"] = "hidden" if chosen == "true" else "visible"
 		self.active_accounts = ["account-1"]
 		proc = SimpleNamespace(pid=123,returncode=0,poll=lambda:0)
 		inherited = {key:value for key,value in os.environ.items() if key != "REWARDS_HEADLESS"}
@@ -248,7 +250,7 @@ class EdgeSupervisorTests(unittest.TestCase):
 		self.prior_state(tile=False,minutes=None,target=None)
 		env = self.evening_env()
 		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
-		self.assertNotIn("REWARDS_HEADLESS",env)
+		self.assertEqual(env.get("REWARDS_HEADLESS"),"false")
 
 
 	def test_fill_with_no_earlier_observation_keeps_browser_choice(self):
