@@ -132,7 +132,7 @@ def last_slot(values, at):
 	return None
 
 
-def _day_run_ids(at, *, system_local=False):
+def _day_run_ids(at, *, system_local=False, run_ids=None):
 	"""Use the UTC run-id timestamp to stop before opening an older file."""
 	if at.tzinfo is None: at = at.astimezone()
 	midnight = datetime.combine(at.date(), datetime.min.time())
@@ -140,7 +140,7 @@ def _day_run_ids(at, *, system_local=False):
 	start = midnight.astimezone(timezone.utc) if system_local else midnight.replace(tzinfo=at.tzinfo).astimezone(timezone.utc)
 	lower = start.strftime("%Y%m%dT%H%M%SZ")
 	upper = at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-	for run_id in run_record.list_run_ids(str(paths.runs_dir())):
+	for run_id in run_record.list_run_ids(str(paths.runs_dir())) if run_ids is None else sorted(run_ids, reverse=True):
 		stamp = run_id[:16]
 		if stamp < lower: break
 		if stamp <= upper: yield run_id
@@ -268,7 +268,7 @@ def process_run(run_id, events, *, user_data_dir):
 		return state
 
 
-def snapshot(values, account_ids, *, user_data_dir=None, now=None):
+def snapshot(values, account_ids, *, user_data_dir=None, now=None, records=None):
 	from rfapp import settings
 	now = (now or datetime.now()).astimezone()
 	today = now.date()
@@ -280,8 +280,9 @@ def snapshot(values, account_ids, *, user_data_dir=None, now=None):
 		return {"mode":effective_mode(values.get("run.edge_streak", "off"), state), "auto_off":state.get("auto_off"), "accounts":[]}
 	rules = account_history.aliases()
 	directory = str(user_data_dir or settings.user_data_dir())
-	for run_id in _day_run_ids(now, system_local=True):
-		events = account_history.project_events(run_record.read_events(str(paths.runs_dir() / (run_id + ".jsonl"))), directory, rules)
+	for run_id in _day_run_ids(now, system_local=True, run_ids=records):
+		raw = records[run_id] if records is not None else run_record.read_events(str(paths.runs_dir() / (run_id + ".jsonl")))
+		events = account_history.project_events(raw, directory, rules)
 		if any(e.get("v") != run_record.SCHEMA_VERSION for e in events): continue
 		start = next((e for e in events if e.get("type") == "run_start"), {})
 		end = next((e for e in reversed(events) if e.get("type") == "run_end"), {})

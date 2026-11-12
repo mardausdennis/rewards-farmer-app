@@ -1,6 +1,9 @@
 """Reduce versioned farmer records into snapshots; never interpret console text."""
 
 from datetime import datetime, timedelta, timezone
+from collections import OrderedDict
+import copy
+import json
 import logging
 import math
 import os
@@ -17,6 +20,8 @@ logger = logging.getLogger("rfapp")
 _TASK_IDS = ("daily_set", "explore_on_bing", "visual_search", "misc_cards", "quests", "searches", "bonus")
 _STATE_FIELDS = ("balance", "earned_today", "searches_earned", "searches_max", "daily_set_open", "cards_open", "quests_open", "open_points", "unreadable")
 _EVENT_TYPES = frozenset(("run_start", "account_start", "browser_failed", "state", "decision", "task_start", "search_points", "card_left_open", "task_end", "warning", "account_end", "stop_requested", "run_end", "notified", "deferred", "edge_browsing"))
+_overview_lock = threading.RLock()
+_overview_cache = OrderedDict()
 
 
 def active_run_id() -> str | None:
@@ -89,11 +94,11 @@ def _edge_browsing(event):
 	return value
 
 
-def load_run(run_id: str, labels: dict[str, str], user_data_dir: str, *, account_id=None, history_aliases=None) -> dict:
+def load_run(run_id: str, labels: dict[str, str], user_data_dir: str, *, account_id=None, history_aliases=None, _events=None) -> dict:
 	path = _path(run_id)
 	if not path.is_file():
 		raise FileNotFoundError(run_id)
-	events = run_record.read_events(str(path))
+	events = run_record.read_events(str(path)) if _events is None else _events
 	rules = account_history.aliases(history_aliases)
 	start = next((event for event in events if event.get("type") == "run_start"), {})
 	end = next((event for event in reversed(events) if event.get("type") == "run_end"), None)
@@ -270,17 +275,79 @@ def history(limit: int = 50, before: str | None = None, include_checks: bool = T
 	return {"runs": page, "next_before": page[-1]["run_id"] if len(items) > limit and page else None}
 
 
+def _file_signature(path):
+	try:
+		stat = path.stat()
+		return stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_dev, stat.st_ino
+	except FileNotFoundError:
+		return None
+
+
+def _overview_files(folder):
+	# One metadata pass replaces repeated glob/stat/mkdir work. Only record and
+	# log identities invalidate the reduction; sign-in status is live in Bridge.
+	files = []
+	with os.scandir(folder) as entries:
+		for entry in entries:
+			name = Path(entry.name)
+			if name.suffix not in (".jsonl", ".log") or not run_record._RUN_ID.fullmatch(name.stem): continue
+			try:
+				stat = entry.stat()
+			except FileNotFoundError:
+				continue
+			files.append((entry.name, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_dev, stat.st_ino))
+	return tuple(sorted(files, reverse=True))
+
+
 def overview(settings: dict, prefs: dict, now: datetime, account_id=None) -> dict:
+	from rfapp import settings as settings_module, i18n
+	active_ids, paused_ids = settings_module.active_accounts(), settings_module.paused_accounts()
+	if account_id is not None and account_id not in active_ids + paused_ids:
+		raise ValueError("accounts.unknown")
+	user_data_dir = str(settings_module.user_data_dir())
+	info = run_lock.status(directory=user_data_dir)
+	local = now.astimezone()
+	folder = paths.runs_dir()
+	translator = i18n.current()
+	context = (str(folder.absolute()), str(paths.data_home().absolute()), user_data_dir, tuple(active_ids), tuple(paused_ids), account_id,
+		json.dumps({key:prefs.get(key) for key in ("account_labels", "history_aliases", "goals")},sort_keys=True),
+		settings.get("run.edge_streak", "off"), local.date(), local.utcoffset(), id(translator), repr(info))
+	with _overview_lock:
+		files = _overview_files(folder)
+		state_signature = (_file_signature(paths.data_home() / "edge-streak.json"), _file_signature(paths.prefs_path()))
+		key = context, files, state_signature
+		cached = _overview_cache.get(key)
+		if cached is not None and cached[0] <= now and (cached[1] is None or now < cached[1]):
+			_overview_cache.move_to_end(key)
+			return copy.deepcopy(cached[2])
+		ids = [Path(item[0]).stem for item in files if item[0].endswith(".jsonl")]
+		records = {run_id:run_record.read_events(str(folder / (run_id + ".jsonl"))) for run_id in ids}
+		read_complete = all(records[Path(item[0]).stem] or item[1] == 0 for item in files if item[0].endswith(".jsonl"))
+		result = _overview(settings, prefs, now, account_id, _records=records, _context=(active_ids, paused_ids, user_data_dir, info))
+		future = [at for events in records.values() for event in events if (at := _at(event.get("ts"))) is not None and at > now]
+		# Edge's day window also admits a file by its run-id timestamp, even
+		# when a malformed or imported event carries an earlier timestamp.
+		future.extend(at for run_id in ids if (at := _at(account_history._run_started(run_id))) is not None and at > now)
+		# A growing record or a concurrent atomic replacement is not a stable
+		# snapshot. Return it as before, but never retain it for the next poll.
+		if (read_complete and files == _overview_files(folder)
+			and state_signature == (_file_signature(paths.data_home() / "edge-streak.json"), _file_signature(paths.prefs_path()))):
+			_overview_cache[key] = now, min(future) if future else None, copy.deepcopy(result), translator
+			_overview_cache.move_to_end(key)
+			while len(_overview_cache) > 4: _overview_cache.popitem(last=False)
+		return result
+
+
+def _overview(settings: dict, prefs: dict, now: datetime, account_id=None, *, _records=None, _context=None) -> dict:
 	from rfapp import settings as settings_module
 	selected_account = account_id
-	active_ids = settings_module.active_accounts()
-	paused_ids = settings_module.paused_accounts()
+	active_ids, paused_ids = _context[:2] if _context is not None else (settings_module.active_accounts(), settings_module.paused_accounts())
 	if account_id is not None:
 		if account_id not in active_ids + paused_ids:
 			raise ValueError("accounts.unknown")
 		active_ids = [value for value in active_ids if value == account_id]
 		paused_ids = [value for value in paused_ids if value == account_id]
-	user_data_dir = str(settings_module.user_data_dir())
+	user_data_dir = _context[2] if _context is not None else str(settings_module.user_data_dir())
 	labels = prefs.get("account_labels", {})
 	aliases = prefs.get("history_aliases", [])
 	rules = account_history.aliases(aliases)
@@ -289,15 +356,18 @@ def overview(settings: dict, prefs: dict, now: datetime, account_id=None) -> dic
 	data = {account_id: {"states": [], "balances": {}, "daily_states": {}, "earned": {}, "tasks": {}} for account_id in active_ids + paused_ids}
 	records = {}
 	last_run = None
-	for run_id in reversed(run_record.list_run_ids(str(paths.runs_dir()))):
+	if _records is None:
+		_records = {run_id:run_record.read_events(str(_path(run_id))) for run_id in run_record.list_run_ids(str(paths.runs_dir()))}
+	projected = {run_id:account_history.project_events(events, user_data_dir, rules) for run_id,events in _records.items()}
+	for run_id in sorted(_records):
 		try:
-			detail = load_run(run_id, labels, user_data_dir, account_id=selected_account, history_aliases=aliases)
+			detail = load_run(run_id, labels, user_data_dir, account_id=selected_account, history_aliases=aliases, _events=_records[run_id])
 		except FileNotFoundError:
 			continue
 		last_run = _summary(detail)
 		if detail["result"] == "unknown":
 			continue
-		events = account_history.project_events(run_record.read_events(str(_path(run_id))), user_data_dir, rules)
+		events = projected[run_id]
 		records[run_id] = events
 		profiles = {event.get("account"): event.get("profile") for event in events if event.get("type") == "account_start"}
 		for event in events:
@@ -366,14 +436,16 @@ def overview(settings: dict, prefs: dict, now: datetime, account_id=None) -> dic
 	for field in ("balance", "earned_today", "open_points"):
 		values = [row["state"].get(field) if row["state"] else None for row in rows if not row["paused"]]
 		totals[field] = sum(values) if values and all(value is not None for value in values) else None
-	info = run_lock.status(directory=user_data_dir)
+	info = _context[3] if _context is not None else run_lock.status(directory=user_data_dir)
 	result = {"accounts": rows, "totals": totals, "active_run": {"run_id": info.run_id, "since": info.since} if info and info.owner == "farmer" else None, "last_run": last_run,
-		"streaks": streaks.latest(active_ids + paused_ids, user_data_dir, now, history_aliases=aliases)}
+		"streaks": streaks.latest(active_ids + paused_ids, user_data_dir, now, history_aliases=aliases, records=projected) if len(rows) <= 1 else None}
 	if len(rows) > 1:
-		result["streaks_by_account"] = streaks.latest_by_account(active_ids + paused_ids, user_data_dir, now, history_aliases=aliases)
+		result["streaks_by_account"] = streaks.latest_by_account(active_ids + paused_ids, user_data_dir, now, history_aliases=aliases, records=projected)
 		result["streaks"] = None
 	from rfapp import edge_streak
-	result["edge_streak"] = edge_streak.snapshot(settings, active_ids + paused_ids, user_data_dir=user_data_dir, now=now)
+	# Edge owns its current preference projection, which can differ from the
+	# caller's supplied historical aliases. Share raw bytes, not that policy.
+	result["edge_streak"] = edge_streak.snapshot(settings, active_ids + paused_ids, user_data_dir=user_data_dir, now=now, records=_records)
 	return result
 
 
