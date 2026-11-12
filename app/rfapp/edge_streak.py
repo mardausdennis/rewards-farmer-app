@@ -1,6 +1,6 @@
 """App policy for the optional Edge tile, using measured farmer events only."""
 import copy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import math
@@ -132,14 +132,29 @@ def last_slot(values, at):
 	return None
 
 
+def _day_run_ids(at, *, system_local=False):
+	"""Use the UTC run-id timestamp to stop before opening an older file."""
+	if at.tzinfo is None: at = at.astimezone()
+	midnight = datetime.combine(at.date(), datetime.min.time())
+	# A local DST transition can change the offset between midnight and now.
+	start = midnight.astimezone(timezone.utc) if system_local else midnight.replace(tzinfo=at.tzinfo).astimezone(timezone.utc)
+	lower = start.strftime("%Y%m%dT%H%M%SZ")
+	upper = at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+	for run_id in run_record.list_run_ids(str(paths.runs_dir())):
+		stamp = run_id[:16]
+		if stamp < lower: break
+		if stamp <= upper: yield run_id
+
+
 def open_accounts(account_ids, slot, *, user_data_dir):
 	"""A Fill choice is not evidence that any profile has an Edge tile."""
 	if slot.tzinfo is None: slot = slot.astimezone()
 	selected = set(account_ids)
+	if not selected: return set()
 	latest = {}
 	rules = account_history.aliases()
 	try:
-		for run_id in run_record.list_run_ids(str(paths.runs_dir())):
+		for run_id in _day_run_ids(slot, system_local=slot.utcoffset() == slot.astimezone().utcoffset()):
 			events = account_history.project_events(run_record.read_events(str(paths.runs_dir() / (run_id + ".jsonl"))), str(user_data_dir), rules)
 			if any(event.get("v") != run_record.SCHEMA_VERSION for event in events): continue
 			start = next((event for event in events if event.get("type") == "run_start"), {})
@@ -253,8 +268,10 @@ def process_run(run_id, events, *, user_data_dir):
 		return state
 
 
-def snapshot(values, account_ids, *, user_data_dir=None):
+def snapshot(values, account_ids, *, user_data_dir=None, now=None):
 	from rfapp import settings
+	now = (now or datetime.now()).astimezone()
+	today = now.date()
 	selected = list(dict.fromkeys(account_ids))
 	state = load()
 	rows = {account:{"account_id":account, "edge_tile":None, "edge_minutes":None, "edge_target":None, "at":None,
@@ -263,24 +280,29 @@ def snapshot(values, account_ids, *, user_data_dir=None):
 		return {"mode":effective_mode(values.get("run.edge_streak", "off"), state), "auto_off":state.get("auto_off"), "accounts":[]}
 	rules = account_history.aliases()
 	directory = str(user_data_dir or settings.user_data_dir())
-	for run_id in run_record.list_run_ids(str(paths.runs_dir())):
+	for run_id in _day_run_ids(now, system_local=True):
 		events = account_history.project_events(run_record.read_events(str(paths.runs_dir() / (run_id + ".jsonl"))), directory, rules)
 		if any(e.get("v") != run_record.SCHEMA_VERSION for e in events): continue
 		start = next((e for e in events if e.get("type") == "run_start"), {})
 		end = next((e for e in reversed(events) if e.get("type") == "run_end"), {})
 		policy = next((e for e in events if e.get("type") == "edge_streak_plan"), {})
+		finished = _at(end.get("ts"))
+		slot = _at(policy.get("slot"))
 		profiles = {e.get("account"):e.get("profile") for e in events if e.get("type") == "account_start"}
 		for event in events:
 			account = stats_ledger.account_id(event.get("account"), profiles.get(event.get("account")), directory)
 			if account not in rows: continue
 			row, at = rows[account], _at(event.get("ts"))
-			if event.get("type") == "state" and "edge_tile" in event and at is not None and (_at(row["at"]) is None or at >= _at(row["at"])):
+			if (event.get("type") == "state" and "edge_tile" in event and at is not None and at <= now
+				and at.astimezone().date() == today and (_at(row["at"]) is None or at >= _at(row["at"]))):
 				tile = event.get("edge_tile") if type(event.get("edge_tile")) is bool else None
 				minutes, target = _minutes(event.get("edge_minutes")), _known_target(event.get("edge_target"))
 				row.update(edge_tile=tile, edge_minutes=minutes if tile else None, edge_target=target if tile else None, at=event["ts"], run_id=run_id)
-			if (event.get("type") == "account_end" and not event.get("error_code") and start.get("trigger") == "scheduled" and _at(policy.get("slot")) is not None
-				and end.get("result") in ("ok", "partial", "skipped", "checked") and _at(end.get("ts")) is not None
+			if (event.get("type") == "account_end" and not event.get("error_code") and start.get("trigger") == "scheduled"
+				and slot is not None and slot.astimezone().date() == today
+				and end.get("result") in ("ok", "partial", "skipped", "checked") and finished is not None
+				and finished <= now and finished.astimezone().date() == today
 				and not any(e.get("type") == "stop_requested" for e in events)
-				and (_at(row["last_scheduled_at"]) is None or _at(end["ts"]) >= _at(row["last_scheduled_at"]))):
+				and (_at(row["last_scheduled_at"]) is None or finished >= _at(row["last_scheduled_at"]))):
 				row.update(last_scheduled_at=end["ts"], last_scheduled_run_id=run_id)
 	return {"mode":effective_mode(values.get("run.edge_streak", "off"), state), "auto_off":state.get("auto_off"), "accounts":list(rows.values())}

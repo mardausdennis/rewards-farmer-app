@@ -373,7 +373,7 @@ def overview(settings: dict, prefs: dict, now: datetime, account_id=None) -> dic
 		result["streaks_by_account"] = streaks.latest_by_account(active_ids + paused_ids, user_data_dir, now, history_aliases=aliases)
 		result["streaks"] = None
 	from rfapp import edge_streak
-	result["edge_streak"] = edge_streak.snapshot(settings, active_ids + paused_ids, user_data_dir=user_data_dir)
+	result["edge_streak"] = edge_streak.snapshot(settings, active_ids + paused_ids, user_data_dir=user_data_dir, now=now)
 	return result
 
 

@@ -121,7 +121,7 @@ class EdgeSettingTests(unittest.TestCase):
 		(self.root / "runs").mkdir(exist_ok=True)
 		(self.root / "runs" / (identity + ".jsonl")).write_text("\n".join(map(json.dumps,events)) + "\n")
 		with patch.object(settings, "user_data_dir", return_value=self.root / "profiles"):
-			data = edge_streak.snapshot(settings.load(), ["account-1", "account-2"])
+			data = edge_streak.snapshot(settings.load(), ["account-1", "account-2"], now=datetime(2026,11,11,23).astimezone())
 		self.assertEqual(data["accounts"][0]["edge_minutes"], 4)
 		self.assertEqual(data["accounts"][0]["edge_target"], 30)
 		self.assertEqual(data["accounts"][0]["last_scheduled_run_id"], identity)
@@ -134,7 +134,7 @@ class EdgeSettingTests(unittest.TestCase):
 		state.update(edge_tile=False, edge_minutes=20, edge_target=30)
 		(self.root / "runs").mkdir(exist_ok=True)
 		(self.root / "runs" / (identity + ".jsonl")).write_text("\n".join(map(json.dumps,events)) + "\n")
-		data = edge_streak.snapshot(settings.load(), ["account-1"], user_data_dir=str(self.root / "profiles"))["accounts"][0]
+		data = edge_streak.snapshot(settings.load(), ["account-1"], user_data_dir=str(self.root / "profiles"), now=datetime(2026,11,11,23).astimezone())["accounts"][0]
 		self.assertFalse(data["edge_tile"])
 		self.assertIsNone(data["edge_minutes"])
 		self.assertIsNone(data["last_scheduled_run_id"])
