@@ -67,7 +67,7 @@ class RuntimeTests(unittest.TestCase):
 		self.runtime._idle_active = False
 		self.runtime.push = Mock()
 		self.api._schedule_callback = self.runtime._cache_schedule
-		self.patch = patch.object(window, "paths", SimpleNamespace(env_path=lambda: self.home / ".env", prefs_path=lambda: self.home / "app-prefs.json", runs_dir=lambda: self.home))
+		self.patch = patch.object(window, "paths", SimpleNamespace(data_home=lambda: self.home, env_path=lambda: self.home / ".env", prefs_path=lambda: self.home / "app-prefs.json", runs_dir=lambda: self.home))
 		self.patch.start()
 		self.addCleanup(self.patch.stop)
 
