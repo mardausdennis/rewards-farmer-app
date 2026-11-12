@@ -97,6 +97,45 @@ class Harness:
 
 
 class VisualIdentityTests(unittest.TestCase):
+	def test_loading_heading_settles_then_task_records_ok(self):
+		h = Harness(title="Loading...")
+		section = h.driver.children[(By.TAG_NAME, "section")][0]
+		find = section.find_elements
+		reads = []
+		def settle(by, selector):
+			if (by, selector) == (By.CSS_SELECTOR, HEADINGS):
+				reads.append(None)
+				section.children[(by, selector)][0].text = "Loading..." if len(reads) < 3 else "Visual Search Streak"
+			return find(by, selector)
+		section.find_elements = settle
+		wait = RealWait
+		with mock.patch(__name__ + ".RealWait", lambda driver, timeout: wait(driver, 0.2, poll_frequency=0.01)):
+			end = h.run()
+		self.assertEqual((end["outcome"], end["reason_key"]), ("ok", None))
+		self.assertEqual(h.clicked[:3], [h.earn, h.tiles[3], h.action])
+
+	def test_loading_forever_is_not_ready_without_activity_click(self):
+		for title in ("Loading...", ""):
+			with self.subTest(title=title):
+				h = Harness(title=title)
+				end = h.run()
+				self.assertEqual((end["outcome"], end["reason_key"]), ("fail", "not_ready"))
+				self.assertEqual(end["detail"], "opened the sidebar, then visual search state: panel_action_missing")
+				self.assertNotIn("expected Visual Search Streak panel", end["detail"])
+				self.assertEqual(h.clicked, [h.earn, h.tiles[3]])
+
+	def test_busy_and_visible_spinner_cannot_authorize_panel_actions(self):
+		for variant in ("busy", "spinner"):
+			with self.subTest(variant=variant):
+				h = Harness()
+				section = h.driver.children[(By.TAG_NAME, "section")][0]
+				if variant == "busy":
+					section.attributes["aria-busy"] = "true"
+				else:
+					section.children[(By.CSS_SELECTOR, '[aria-busy="true"], [role="progressbar"], [role="spinner"], [role="status"]')] = [FakeElement(attributes={"role": "progressbar"})]
+				with self.assertRaises(element_selectors.ElementNotReady):
+					h.tasks.elements.get_search_now_link_from_visual_search_sidebar()
+
 	def test_absent_tile_skips_without_clicking_app_or_generating_image(self):
 		h = Harness(titles=SLIMDEBUG)
 		end = h.run()

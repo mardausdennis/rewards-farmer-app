@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait as RealWait
 from fakes import FakeElement
 import element_selectors
 import browser
@@ -24,12 +25,12 @@ import run_record
 
 
 class SearchPage:
-	def __init__(self, *, before=3, maximum=60, missing_after_batch=True, recovery_works=True, credited_per_query=3, fail_clear_after=None):
+	def __init__(self, *, before=3, maximum=60, missing_after_batch=True, recovery_works=True, credited_per_query=3, fail_input_after=None):
 		self.earned, self.maximum = before, maximum
 		self.missing_after_batch = missing_after_batch
 		self.recovery_works = recovery_works
 		self.credited_per_query = credited_per_query
-		self.fail_clear_after = fail_clear_after
+		self.fail_input_after = fail_input_after
 		self.sent, self.clear_clicks, self.earn_misses = 0, 0, 0
 		self.visited, self.clicked, self.scripts = [], [], []
 		self.current_url = rewards_tasks.REWARDS_HOME_URL
@@ -61,18 +62,12 @@ class SearchPage:
 				self.earn_misses += 1
 				raise NoSuchElementException("synthetic earn navigation absent after page return")
 			return self.node("earn")
-		if (by, selector) == (By.TAG_NAME, "textarea"):
-			return self.node("search")
-		if (by, selector) == (By.ID, "sw_clx"):
-			if self.sent == self.fail_clear_after:
-				# The wait's first lookup succeeds; the click's fresh lookup misses.
-				self.fail_clear_after = None
-				self.pending_clear_failure = True
-				return self.node("clear")
-			if getattr(self, "pending_clear_failure", False):
-				self.pending_clear_failure = False
-				raise NoSuchElementException("synthetic final clear button disappeared before click")
-			return self.node("clear")
+		if (by, selector) == (By.ID, "sb_form_q"):
+			if self.sent == self.fail_input_after:
+				raise NoSuchElementException("synthetic search input disappeared")
+			element = self.node("search")
+			element.send_keys = lambda *keys: None
+			return element
 		raise AssertionError((by, selector))
 
 	def find_elements(self, by, selector):
@@ -128,7 +123,7 @@ class SearchQuotaRecoveryTests(unittest.TestCase):
 		tasks = self.tasks()
 		with mock.patch.object(run_record, "emit") as emit, self.assertLogs(rewards_tasks.logger, level="INFO") as logs:
 			tasks.complete_required_searches()
-		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earn_misses), (19, 19, 1))
+		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earn_misses), (19, 0, 1))
 		self.assertEqual(tasks.driver.earned, 60)
 		self.assertEqual(tasks.progress, "sent 19 searches")
 		self.assertEqual(tasks.driver.visited, ["https://www.bing.com/", rewards_tasks.REWARDS_HOME_URL, "https://rewards.bing.com/earn"])
@@ -304,17 +299,17 @@ class SearchQuotaRecoveryTests(unittest.TestCase):
 			self.assertTrue(any(event["type"] == "task_end" and event["task"] == "bonus" and event["outcome"] == "ok" for event in events))
 			tasks.driver.quit.assert_called_once_with()
 
-	def test_last_clear_lookup_failure_after_nineteenth_query_checks_measured_quota(self):
-		tasks = self.tasks(fail_clear_after=19)
+	def test_last_query_needs_no_clear_lookup_before_measuring_quota(self):
+		tasks = self.tasks()
 		with mock.patch.object(run_record, "emit") as emit, self.assertLogs(rewards_tasks.logger, level="INFO") as logs:
 			tasks.complete_required_searches()
-		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earned), (19, 18, 60))
-		self.assertEqual(tasks.driver.visited, ["https://www.bing.com/", "https://rewards.bing.com/earn"])
+		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earned), (19, 0, 60))
+		self.assertEqual(tasks.driver.visited, ["https://www.bing.com/", rewards_tasks.REWARDS_HOME_URL, "https://rewards.bing.com/earn"])
 		self.assertIn("Round 1: 19 searches -> 60/60", "\n".join(logs.output))
 		self.assertIn(mock.call("search_points", earned=60, max=60, round=1), emit.call_args_list)
 
-	def test_final_clear_failure_is_ok_in_task_record_only_after_full_quota_read(self):
-		tasks = self.tasks(fail_clear_after=19)
+	def test_no_clear_button_is_ok_in_task_record_only_after_full_quota_read(self):
+		tasks = self.tasks()
 		tasks.restore_main_tab = lambda: None
 		for task, _, method in rewards_tasks.TASKS:
 			if task != "searches":
@@ -325,9 +320,9 @@ class SearchQuotaRecoveryTests(unittest.TestCase):
 		self.assertEqual((end["outcome"], end["reason_key"], end["progress"]), ("ok", None, "sent 19 searches"))
 		self.assertEqual(tasks.driver.earned, tasks.driver.maximum)
 
-	def test_clear_failure_before_quota_is_full_preserves_original_failure(self):
-		tasks = self.tasks(fail_clear_after=18)
-		with self.assertLogs(rewards_tasks.logger, level="WARNING"), self.assertRaisesRegex(NoSuchElementException, "final clear button"):
+	def test_input_failure_before_quota_is_full_preserves_original_failure(self):
+		tasks = self.tasks(fail_input_after=18)
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertLogs(rewards_tasks.logger, level="WARNING"), self.assertRaisesRegex(TimeoutException, "search input"):
 			tasks.complete_required_searches()
 		self.assertEqual((tasks.driver.sent, tasks.driver.earned), (18, 57))
 		self.assertEqual(tasks.driver.visited.count("https://rewards.bing.com/earn"), 1)
@@ -340,11 +335,11 @@ class SearchQuotaRecoveryTests(unittest.TestCase):
 		self.assertEqual(tasks.progress, "sent 0 searches")
 		self.assertEqual(tasks.driver.visited, [])
 
-	def test_unreadable_quota_after_final_clear_failure_preserves_failure_not_guessed_success(self):
-		tasks = self.tasks(fail_clear_after=19, recovery_works=False)
-		with self.assertLogs(rewards_tasks.logger, level="WARNING"), self.assertRaisesRegex(NoSuchElementException, "final clear button"):
+	def test_unreadable_quota_after_input_failure_preserves_failure_not_guessed_success(self):
+		tasks = self.tasks(fail_input_after=18, recovery_works=False)
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertLogs(rewards_tasks.logger, level="WARNING"), self.assertRaisesRegex(TimeoutException, "search input"):
 			tasks.complete_required_searches()
-		self.assertEqual(tasks.driver.earned, 60)
+		self.assertEqual(tasks.driver.earned, 57)
 		self.assertEqual(tasks.driver.visited.count("https://rewards.bing.com/earn"), 1)
 
 	def test_failed_post_batch_read_with_short_fresh_read_preserves_original_error(self):
@@ -358,33 +353,33 @@ class SearchQuotaRecoveryTests(unittest.TestCase):
 		self.assertEqual(tasks.driver.sent, 19)
 
 	def test_numeric_sent_counter_not_progress_text_drives_batch_recovery(self):
-		tasks = self.tasks(fail_clear_after=19)
-		click = tasks.move_to_and_click
-		def localized_progress(element):
+		tasks = self.tasks(fail_input_after=18, credited_per_query=4)
+		wait = tasks.wait_for_element
+		def localized_progress(getter, timeout=10):
 			try:
-				return click(element)
-			except NoSuchElementException:
+				return wait(getter, timeout=timeout)
+			except TimeoutException:
 				tasks.progress = "synthetic nonnumeric progress"
 				raise
-		tasks.move_to_and_click = localized_progress
-		with self.assertLogs(rewards_tasks.logger, level="INFO") as logs:
+		tasks.wait_for_element = localized_progress
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertLogs(rewards_tasks.logger, level="INFO") as logs:
 			tasks.complete_required_searches()
-		self.assertEqual((tasks._searches_sent, tasks.driver.sent), (19, 19))
-		self.assertIn("Round 1: 19 searches -> 60/60", "\n".join(logs.output))
+		self.assertEqual((tasks._searches_sent, tasks.driver.sent), (18, 18))
+		self.assertIn("Round 1: 18 searches -> 60/60", "\n".join(logs.output))
 
-	def test_run_search_batch_keeps_cumulative_counter_when_clear_lookup_fails(self):
-		tasks = self.tasks(fail_clear_after=1)
-		with self.assertRaises(NoSuchElementException):
-			tasks.run_search_batch(1, already_sent=7)
+	def test_run_search_batch_keeps_cumulative_counter_when_next_input_lookup_fails(self):
+		tasks = self.tasks(fail_input_after=1)
+		with mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)), self.assertRaises(TimeoutException):
+			tasks.run_search_batch(2, already_sent=7)
 		self.assertEqual(tasks._searches_sent, 8)
 		self.assertEqual(tasks.progress, "sent 8 searches")
 
 
 class UpstreamSearchPage:
-	def __init__(self, *, missing_earn=True, clear_after=None, credit=3, recovery_works=True):
+	def __init__(self, *, missing_earn=True, input_after=None, credit=3, recovery_works=True):
 		self.earned, self.maximum = 3, 60
 		self.missing_after_batch = missing_earn
-		self.fail_clear_after = clear_after
+		self.fail_input_after = input_after
 		self.credit, self.recovery_works = credit, recovery_works
 		self.sent, self.clear_clicks = 0, 0
 		self.visited = []
@@ -418,18 +413,13 @@ class UpstreamSearchPage:
 			if self.missing_earn:
 				raise self.recovery_error if self.recovering else self.original_error
 			return self.node("earn")
-		if (by, selector) == (By.TAG_NAME, "textarea"):
-			return self.node("search")
-		if (by, selector) == (By.ID, "sw_clx"):
-			if self.sent == self.fail_clear_after:
-				self.fail_clear_after = None
-				self.pending_clear_failure = True
-				return self.node("clear")
-			if getattr(self, "pending_clear_failure", False):
-				self.pending_clear_failure = False
-				self.original_error = NoSuchElementException("synthetic last clear button disappeared")
+		if (by, selector) == (By.ID, "sb_form_q"):
+			if self.sent == self.fail_input_after:
+				self.original_error = NoSuchElementException("synthetic search input disappeared")
 				raise self.original_error
-			return self.node("clear")
+			element = self.node("search")
+			element.send_keys = lambda *keys: None
+			return element
 		raise AssertionError((by, selector))
 
 	def find_elements(self, by, selector):
@@ -460,6 +450,7 @@ class UpstreamSearchQuotaRecoveryTests(unittest.TestCase):
 		self.stack = contextlib.ExitStack()
 		self.addCleanup(self.stack.close)
 		self.stack.enter_context(mock.patch.object(rewards_tasks.time, "sleep", lambda _: None))
+		self.stack.enter_context(mock.patch.object(rewards_tasks, "WebDriverWait", lambda driver, timeout: RealWait(driver, 0)))
 		self.stack.enter_context(mock.patch.object(rewards_tasks.queries, "related_queries", lambda count: (f"synthetic query {index}" for index in range(count))))
 		self.stack.enter_context(mock.patch.object(rewards_tasks.RewardsTaskUtils, "dismiss_cookie_consent", return_value=False))
 
@@ -486,36 +477,36 @@ class UpstreamSearchQuotaRecoveryTests(unittest.TestCase):
 		tasks = self.tasks()
 		error, logs = self.run_searches(tasks)
 		self.assertIsNone(error)
-		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earned), (19, 19, 60))
+		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earned), (19, 0, 60))
 		self.assertEqual(tasks.driver.visited, ["https://www.bing.com/", rewards_tasks.REWARDS_HOME_URL, "https://rewards.bing.com/earn"])
 		warning = "WARNING:rewards_tasks:Search result could not be verified after 19 searches (NoSuchElementException), reloading once"
 		self.assertIn(warning, logs.output)
 		print(warning)
 		self.assertIn("INFO:rewards_tasks:Search quota complete: 60/60", logs.output)
 
-	def test_last_query_credited_before_clear_button_disappears(self):
-		tasks = self.tasks(clear_after=19)
+	def test_last_query_needs_no_clear_button_before_measuring_credit(self):
+		tasks = self.tasks()
 		error, logs = self.run_searches(tasks)
 		self.assertIsNone(error)
-		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earned), (19, 18, 60))
-		self.assertEqual(tasks.driver.visited, ["https://www.bing.com/", "https://rewards.bing.com/earn"])
+		self.assertEqual((tasks.driver.sent, tasks.driver.clear_clicks, tasks.driver.earned), (19, 0, 60))
+		self.assertEqual(tasks.driver.visited, ["https://www.bing.com/", rewards_tasks.REWARDS_HOME_URL, "https://rewards.bing.com/earn"])
 		self.assertIn("INFO:rewards_tasks:Round 1: 19 searches -> 60/60", logs.output)
 
 	def test_short_recovery_preserves_original_error_without_guessing_credit(self):
-		for clear_after in (None, 18):
-			with self.subTest(clear_after=clear_after):
-				tasks = self.tasks(clear_after=clear_after, credit=0)
+		for input_after in (None, 18):
+			with self.subTest(input_after=input_after):
+				tasks = self.tasks(input_after=input_after, credit=0)
 				error, logs = self.run_searches(tasks)
-				self.assertIs(error, tasks.driver.original_error)
+				self.assertIs(error if input_after is None else error.__cause__, tasks.driver.original_error)
 				self.assertEqual(tasks.driver.visited.count("https://rewards.bing.com/earn"), 1)
 				self.assertFalse(any("Search quota complete" in line for line in logs.output))
 
 	def test_unreadable_recovery_preserves_original_error_not_the_recovery_error(self):
-		for clear_after in (None, 19):
-			with self.subTest(clear_after=clear_after):
-				tasks = self.tasks(clear_after=clear_after, recovery_works=False)
+		for input_after in (None, 18):
+			with self.subTest(input_after=input_after):
+				tasks = self.tasks(input_after=input_after, recovery_works=False)
 				error, _ = self.run_searches(tasks)
-				self.assertIs(error, tasks.driver.original_error)
+				self.assertIs(error if input_after is None else error.__cause__, tasks.driver.original_error)
 				self.assertEqual(tasks.driver.visited.count("https://rewards.bing.com/earn"), 1)
 
 	def test_timeout_after_batch_recovers_once_when_fresh_quota_is_full(self):

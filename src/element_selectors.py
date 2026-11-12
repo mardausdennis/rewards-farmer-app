@@ -311,6 +311,20 @@ class ElementSelectionUtils:
 		labels = [cls._visual_label(title.text) for title in section.find_elements(By.CSS_SELECTOR, 'h1, h2, h3, h4, h5, h6, [role="heading"]') if title.is_displayed()]
 		return [label for label in labels if label] or [cls._visual_label(line) for line in (section.text or "").splitlines() if line.strip().casefold().endswith("streak")]
 
+	def _streak_panel_loading(self, section):
+		if section.get_dom_attribute("aria-busy") == "true":
+			return True
+		for control in section.find_elements(By.CSS_SELECTOR, '[aria-busy="true"], [role="progressbar"], [role="spinner"], [role="status"]'):
+			if control.is_displayed() and (control.get_dom_attribute("role") != "status"
+				or re.fullmatch(r"loading[.\u2026]*", self._visual_label(control.text), re.I)):
+				return True
+		for heading in section.find_elements(By.CSS_SELECTOR, 'h1, h2, h3, h4, h5, h6, [role="heading"]'):
+			if heading.is_displayed():
+				label = self._visual_label(heading.text)
+				if not label or re.fullmatch(r"loading[.\u2026]*", label, re.I):
+					return True
+		return False
+
 	def get_open_daily_set_button(self):
 		try:
 			return self._streak_tile(Labels.DAILY_SET_STREAK)
@@ -547,9 +561,13 @@ class ElementSelectionUtils:
 
 	def get_visual_search_sidebar(self):
 		titles, untitled = [], []
+		loading = False
 		for section in self.driver.find_elements(By.TAG_NAME, "section"):
 			try:
 				if not (section.get_dom_attribute("id") or "").startswith("react-aria") or not section.is_displayed():
+					continue
+				if self._streak_panel_loading(section):
+					loading = True
 					continue
 				labels = self.streak_panel_titles(section)
 				if any(Labels.VISUAL_SEARCH_STREAK in label.casefold() for label in labels):
@@ -561,6 +579,9 @@ class ElementSelectionUtils:
 				continue
 		if titles:
 			raise UnexpectedVisualSearchPanel("expected Visual Search Streak panel; opened panel: " + ", ".join(dict.fromkeys(titles)))
+		if loading:
+			# Placeholder headings describe hydration, not another streak's identity.
+			raise ElementNotReady("visual search panel is still loading")
 		if untitled:
 			sidebar = untitled[0]
 			if not self._untitled_visual_panel_logged:
@@ -823,7 +844,8 @@ return (
 	# ------------------------------------------------------------------
 
 	def get_bing_search_bar(self):
-		return self.driver.find_element(By.TAG_NAME, "textarea")
+		# Bing uses a textarea on home and an input on results pages.
+		return self.driver.find_element(By.ID, "sb_form_q")
 
 	def get_clear_bing_search_query_button(self):
 		return self.driver.find_element(By.ID, "sw_clx")
