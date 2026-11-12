@@ -283,7 +283,7 @@ class SearchQuotaRecoveryTests(unittest.TestCase):
 			stack.enter_context(mock.patch.dict(os.environ, {"USER_DATA_DIR": str(home / "profiles")}, clear=True))
 			stack.enter_context(mock.patch.object(constants, "RUNS_DIR", str(home / "runs")))
 			stack.enter_context(mock.patch.object(main.log_utils, "setup_logging"))
-			stack.enter_context(mock.patch.object(main, "HEADLESS", True))
+			stack.enter_context(mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}))
 			for name, value in (("reset_virtual_desktop_state", None), ("prepare_desktop_before_launch", True), ("switch_back_after_launch", None), ("cleanup_virtual_desktop", None), ("is_virtual_desktop_enabled", False)):
 				stack.enter_context(mock.patch.object(main.desktop_utils, name, return_value=value))
 			stack.enter_context(mock.patch.object(browser, "start_driver", return_value=tasks.driver))

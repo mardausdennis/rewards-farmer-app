@@ -147,9 +147,7 @@ class RunLoopTestCase(EnvironmentTestCase):
 		super().setUp()
 
 		# main() waits on input() when it is not headless, which would hang.
-		headless = main.HEADLESS
-		main.HEADLESS = True
-		self.addCleanup(setattr, main, "HEADLESS", headless)
+		self.enterContext(mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}))
 
 		# main() reports per account at info, and the failure paths at error, by
 		# design. The assertions are what reports the outcome here, so keep the
@@ -206,7 +204,7 @@ class TestUnattendedRun(RunLoopTestCase):
 	def setUp(self):
 		super().setUp()
 
-		main.HEADLESS = False
+		os.environ["REWARDS_HEADLESS"] = "false"
 
 		real = main.run_account
 		self.addCleanup(setattr, main, "run_account", real)

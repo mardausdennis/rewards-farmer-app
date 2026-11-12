@@ -295,7 +295,7 @@ class StatsTests(unittest.TestCase):
 		driver = mock.Mock()
 		with contextlib.ExitStack() as stack:
 			stack.enter_context(mock.patch.dict(os.environ, {"REWARDS_ACCOUNTS": "account-1", "USE_VIRTUAL_DESKTOP": "0"}))
-			stack.enter_context(mock.patch.object(main, "HEADLESS", True))
+			stack.enter_context(mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}))
 			stack.enter_context(mock.patch.object(main.log_utils, "setup_logging"))
 			for method in ("reset_virtual_desktop_state", "switch_back_after_launch", "cleanup_virtual_desktop"):
 				stack.enter_context(mock.patch.object(main.desktop_utils, method))

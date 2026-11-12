@@ -16,8 +16,6 @@ import edge_version
 import log_utils
 import run_record
 
-HEADLESS = os.environ.get("REWARDS_HEADLESS", "").strip().lower() in ("1", "true", "yes")
-
 logger = logging.getLogger(__name__)
 
 # Matched in order against the driver's message, lowercased. selenium reports
@@ -46,9 +44,13 @@ EXPLANATIONS = [
 ]
 
 
+def headless_enabled() -> bool:
+	return os.environ.get("REWARDS_HEADLESS", "").strip().lower() in ("1", "true", "yes")
+
+
 def build_options(account: accounts.Account, *, headless: bool | None = None) -> webdriver.EdgeOptions:
 	"""Build or inspect either mode's options without starting Edge or writing state."""
-	headless = HEADLESS if headless is None else headless
+	headless = headless_enabled() if headless is None else headless
 	options = webdriver.EdgeOptions()
 
 	options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -140,7 +142,7 @@ def start_driver(account: accounts.Account):
 	"""An Edge driver for the account, or None after logging why it failed."""
 	try:
 		options = build_options(account)
-		if HEADLESS and sys.platform == "win32" and not any(arg.startswith("--user-agent=") for arg in options.arguments):
+		if "--headless=new" in options.arguments and sys.platform == "win32" and not any(arg.startswith("--user-agent=") for arg in options.arguments):
 			detail = "Edge version could not be read; using the browser's own user agent in hidden mode."
 			logger.warning(detail)
 			run_record.emit("warning", account=account.name, code="edge_version_unknown", detail=detail)

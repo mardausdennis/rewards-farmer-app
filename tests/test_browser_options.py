@@ -46,7 +46,6 @@ class BrowserOptionsTests(unittest.TestCase):
 			"PROGRAMFILES(X86)": r"X:\Programs32", "PROGRAMFILES": r"X:\Programs64", "LOCALAPPDATA": r"X:\UserApps",
 		}, clear=True))
 		self.stack.enter_context(mock.patch.object(browser.sys, "platform", "win32"))
-		self.stack.enter_context(mock.patch.object(browser, "HEADLESS", False))
 		self.driver = self.stack.enter_context(mock.patch.object(browser.webdriver, "Edge"))
 		self.popen = self.stack.enter_context(mock.patch.object(subprocess, "Popen"))
 		self.run = self.stack.enter_context(mock.patch.object(subprocess, "run"))
@@ -121,7 +120,7 @@ class BrowserOptionsTests(unittest.TestCase):
 
 	def test_unknown_version_warns_once_for_each_account_start_not_once_per_process(self):
 		other = accounts.Account("other", "synthetic-profiles/two", "Default")
-		with mock.patch.object(browser, "HEADLESS", True), mock.patch.object(edge_version, "installed_major", return_value=None), mock.patch.object(browser, "build_service", return_value="synthetic service"), self.assertLogs(browser.logger, level="WARNING") as logs:
+		with mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}), mock.patch.object(edge_version, "installed_major", return_value=None), mock.patch.object(browser, "build_service", return_value="synthetic service"), self.assertLogs(browser.logger, level="WARNING") as logs:
 			for account in (PROFILE, PROFILE, other):
 				browser.start_driver(account)
 		self.assertEqual(self.driver.call_count, 3)
@@ -136,7 +135,7 @@ class BrowserOptionsTests(unittest.TestCase):
 		self.popen.assert_not_called()
 
 	def test_known_hidden_version_has_no_warning(self):
-		with mock.patch.object(browser, "HEADLESS", True), mock.patch.object(edge_version, "installed_major", return_value=155), mock.patch.object(browser, "build_service"), mock.patch.object(browser.logger, "warning") as warning:
+		with mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}), mock.patch.object(edge_version, "installed_major", return_value=155), mock.patch.object(browser, "build_service"), mock.patch.object(browser.logger, "warning") as warning:
 			browser.start_driver(PROFILE)
 		warning.assert_not_called()
 		self.emit.assert_not_called()
@@ -146,7 +145,7 @@ class BrowserOptionsTests(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as folder:
 			recorder = run_record.open_run("cli", [PROFILE.name], {}, [], directory=folder)
 			try:
-				with mock.patch.object(browser, "HEADLESS", True), mock.patch.object(edge_version, "installed_major", return_value=None), mock.patch.object(browser, "build_service"), mock.patch.object(run_record, "emit", wraps=recorder.emit), self.assertLogs(browser.logger, level="WARNING"):
+				with mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}), mock.patch.object(edge_version, "installed_major", return_value=None), mock.patch.object(browser, "build_service"), mock.patch.object(run_record, "emit", wraps=recorder.emit), self.assertLogs(browser.logger, level="WARNING"):
 					browser.start_driver(PROFILE)
 				warnings = [event for event in run_record.read_events(recorder.path) if event["type"] == "warning"]
 				self.assertEqual(len(warnings), 1)
@@ -177,15 +176,15 @@ class BrowserOptionsTests(unittest.TestCase):
 		self.assert_passive()
 
 	def test_default_mode_still_uses_headless_setting_and_inspection_does_not_change_it(self):
-		with mock.patch.object(edge_version, "installed_major", return_value=155), mock.patch.object(browser, "HEADLESS", True):
+		with mock.patch.object(edge_version, "installed_major", return_value=155), mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}):
 			self.assertEqual(browser.build_options(PROFILE).arguments, BASE_ARGUMENTS + HIDDEN_ARGUMENTS + [user_agent(155)])
 			self.assertEqual(browser.build_options(PROFILE, headless=False).arguments, BASE_ARGUMENTS)
-			self.assertTrue(browser.HEADLESS)
+			self.assertEqual(os.environ["REWARDS_HEADLESS"], "true")
 		self.assert_passive()
 
 	def test_unknown_version_does_not_warn_for_visible_or_non_windows_starts(self):
 		for platform, hidden in (("win32", False), ("linux", True)):
-			with self.subTest(platform=platform, hidden=hidden), mock.patch.object(browser.sys, "platform", platform), mock.patch.object(browser, "HEADLESS", hidden), mock.patch.object(edge_version, "installed_major") as version, mock.patch.object(browser, "build_service"), mock.patch.object(browser.logger, "warning") as warning:
+			with self.subTest(platform=platform, hidden=hidden), mock.patch.object(browser.sys, "platform", platform), mock.patch.dict(os.environ, {"REWARDS_HEADLESS": str(hidden).lower()}), mock.patch.object(edge_version, "installed_major") as version, mock.patch.object(browser, "build_service"), mock.patch.object(browser.logger, "warning") as warning:
 				browser.start_driver(PROFILE)
 				version.assert_not_called()
 				warning.assert_not_called()

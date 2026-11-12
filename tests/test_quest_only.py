@@ -94,7 +94,7 @@ def record_run(home, plan=None, *, state_changes=None, gain=0, skipped="", quest
 			"REWARDS_ACCOUNTS": ",".join(names), rewards_tasks.SKIP_TASKS_ENV: skipped, run_record.RUN_ID_ENV: "20261022T100000Z-0084"}))
 		stack.enter_context(mock.patch.object(constants, "DATA_HOME", str(home)))
 		stack.enter_context(mock.patch.object(constants, "RUNS_DIR", str(folder)))
-		stack.enter_context(mock.patch.object(main, "HEADLESS", True))
+		stack.enter_context(mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}))
 		stack.enter_context(mock.patch.object(main.log_utils, "setup_logging", lambda: None))
 		for name, value in (("prepare_desktop_before_launch", True), ("switch_back_after_launch", None),
 			("cleanup_virtual_desktop", None), ("reset_virtual_desktop_state", None), ("is_virtual_desktop_enabled", False)):

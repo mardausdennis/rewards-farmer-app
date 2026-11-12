@@ -107,7 +107,7 @@ class StrictRunnerTests(unittest.TestCase):
 		self.stack.enter_context(patch.dict(os.environ, {"REWARDS_FARMER_DATA_HOME": str(self.home), "USER_DATA_DIR": str(self.home / "profiles"), "REWARDS_ACCOUNTS": "one,two"}))
 		self.stack.enter_context(patch.object(run_record.constants, "RUNS_DIR", str(self.home / "runs")))
 		self.stack.enter_context(patch.object(main.log_utils, "setup_logging"))
-		self.stack.enter_context(patch.object(main, "HEADLESS", True))
+		self.stack.enter_context(patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}))
 		for name, value in (("prepare_desktop_before_launch", True), ("switch_back_after_launch", None), ("cleanup_virtual_desktop", None), ("reset_virtual_desktop_state", None), ("is_virtual_desktop_enabled", False)):
 			self.stack.enter_context(patch.object(main.desktop_utils, name, return_value=value))
 		self.browser = Mock()

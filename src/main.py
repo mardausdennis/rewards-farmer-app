@@ -24,8 +24,6 @@ import run_record
 import run_lock
 from file_replace import read_file
 
-HEADLESS = browser.HEADLESS
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_MIN_POINTS = 15
@@ -275,7 +273,7 @@ def main(unattended: bool = False, plan: RunPlan | None = None) -> int:
 		if len(configured) > 1:
 			logger.info("%s/%s accounts ran", started, len(configured))
 		# Preserve the terminal prompt, but never hold a scheduled process open.
-		if not HEADLESS and not unattended:
+		if not browser.headless_enabled() and not unattended:
 			input("Press Enter to exit...")
 		code = 0 if started else 1
 		stats = recorder.stats

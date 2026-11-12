@@ -187,7 +187,7 @@ class TestDriverEnvironment(EnvTestCase):
 		self.assertIn("--disable-gpu", options.arguments)
 
 	def test_headless_sessions_get_the_same_startup_limits_and_cpu_rendering(self):
-		with mock.patch.object(browser, "HEADLESS", True):
+		with mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}):
 			browser.start_driver(ACCOUNT)
 		options = self.seen["options"]
 		self.assertEqual(options.to_capabilities().get("timeouts"), {"pageLoad": 60_000, "script": 30_000})
@@ -201,7 +201,7 @@ class TestDriverEnvironment(EnvTestCase):
 		self.assertIn("--accept-lang=en-US", self.seen["options"].arguments)
 
 	def test_headless_pages_are_asked_for_in_english_too(self):
-		with mock.patch.object(browser, "HEADLESS", True):
+		with mock.patch.dict(os.environ, {"REWARDS_HEADLESS": "true"}):
 			browser.start_driver(ACCOUNT)
 
 		self.assertIn("--accept-lang=en-US", self.seen["options"].arguments)

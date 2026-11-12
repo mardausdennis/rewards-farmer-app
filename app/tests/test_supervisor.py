@@ -150,6 +150,27 @@ class SupervisorTests(unittest.TestCase):
 		self.stack.enter_context(mock.patch.object(paths, "farmer_command", lambda args: [sys.executable, str(fake), scenario]))
 		self.stack.enter_context(mock.patch.object(supervisor.subprocess, "Popen", _REAL_POPEN))
 
+	def test_selected_browser_mode_overrides_inherited_environment_for_every_run_kind(self):
+		for kind in ("scheduled", "run_now", "check_now"):
+			for mode, expected, inherited in (("hidden", "true", "false"), ("visible", "false", "true")):
+				with self.subTest(kind=kind, mode=mode):
+					self.settings["run.browser_mode"] = mode
+					proc = mock.Mock(pid=123, returncode=0)
+					proc.poll.return_value = 0
+					with mock.patch.dict(os.environ, {"REWARDS_HEADLESS": inherited}), mock.patch.object(run_lock, "status", return_value=None), mock.patch.object(supervisor.subprocess, "Popen", return_value=proc) as popen, mock.patch.object(supervisor, "Job"), mock.patch.object(paths, "farmer_command", return_value=["synthetic-farmer"]):
+						self.assertEqual(supervisor.supervise(kind, ["one"]), 0)
+					self.assertEqual(popen.call_args.kwargs["env"]["REWARDS_HEADLESS"], expected)
+
+	def test_edge_topup_plan_still_overrides_visible_setting(self):
+		from rfapp import edge_streak
+		self.settings["run.browser_mode"] = "visible"
+		proc = mock.Mock(pid=123, returncode=0)
+		proc.poll.return_value = 0
+		plan = {"env": {"EDGE_BROWSING_STREAK": "true", "REWARDS_HEADLESS": "true"}, "slot": None, "enabled": True}
+		with mock.patch.object(edge_streak, "plan", return_value=plan), mock.patch.object(run_lock, "status", return_value=None), mock.patch.object(supervisor.subprocess, "Popen", return_value=proc) as popen, mock.patch.object(supervisor, "Job"), mock.patch.object(paths, "farmer_command", return_value=["synthetic-farmer"]):
+			self.assertEqual(supervisor.supervise("scheduled", ["one"]), 0)
+		self.assertEqual(popen.call_args.kwargs["env"]["REWARDS_HEADLESS"], "true")
+
 	@unittest.skipUnless(sys.platform == "win32", "Real Windows job foundation")
 	def test_real_fake_farmer_job_record_reducer_foundation(self):
 		self.inject_command("finish")

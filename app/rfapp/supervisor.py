@@ -141,7 +141,8 @@ def _supervise(kind, accounts, invoked_at, invoked_clock):
 		return failed(ValueError(f"@root cannot be mixed with other account ids: {accounts!r}"))
 	env = {**os.environ, run_record.RUN_ID_ENV: run_id, run_record.TRIGGER_ENV: trigger,
 		"REWARDS_STOP_FILE": str(stop), "REWARDS_FARMER_LOG_FILE": str(directory / (run_id + ".log")),
-		"REWARDS_SUPERVISOR_PID": str(os.getpid()), run_record.APP_VERSION_ENV: __version__, "PYTHONUTF8": "1", "USE_VIRTUAL_DESKTOP": "0"}
+		"REWARDS_SUPERVISOR_PID": str(os.getpid()), run_record.APP_VERSION_ENV: __version__, "PYTHONUTF8": "1", "USE_VIRTUAL_DESKTOP": "0",
+		"REWARDS_HEADLESS": str(s.get("run.browser_mode", "visible") == "hidden").lower()}
 	if accounts is not None:
 		env["REWARDS_ACCOUNTS"] = "" if accounts == ["@root"] else ",".join(accounts)
 	edge_plan = edge_streak.plan(s, kind, invoked_at, elapsed_seconds=time.monotonic() - invoked_clock,
