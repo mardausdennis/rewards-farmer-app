@@ -124,17 +124,59 @@ class VisualIdentityTests(unittest.TestCase):
 				self.assertNotIn("expected Visual Search Streak panel", end["detail"])
 				self.assertEqual(h.clicked, [h.earn, h.tiles[3]])
 
-	def test_busy_and_visible_spinner_cannot_authorize_panel_actions(self):
-		for variant in ("busy", "spinner"):
-			with self.subTest(variant=variant):
+	def test_busy_panel_cannot_authorize_panel_actions(self):
+		h = Harness()
+		section = h.driver.children[(By.TAG_NAME, "section")][0]
+		section.attributes["aria-busy"] = "true"
+		with self.assertRaises(element_selectors.ElementNotReady):
+			h.tasks.elements.get_search_now_link_from_visual_search_sidebar()
+
+	def test_real_wrong_streak_with_ancillary_loader_still_rejected(self):
+		h = Harness(title="Bing App Streak")
+		section = h.driver.children[(By.TAG_NAME, "section")][0]
+		section.children[(By.CSS_SELECTOR, '[aria-busy="true"], [role="progressbar"], [role="spinner"], [role="status"]')] = [FakeElement(attributes={"role": "progressbar"})]
+		with self.assertRaises(element_selectors.UnexpectedVisualSearchPanel):
+			h.tasks.elements.get_search_now_link_from_visual_search_sidebar()
+
+	def test_observed_ready_dialog_ignores_ancillary_loading_marker_and_records_ok(self):
+		for role in ("progressbar", "spinner", "status"):
+			with self.subTest(role=role):
 				h = Harness()
 				section = h.driver.children[(By.TAG_NAME, "section")][0]
-				if variant == "busy":
-					section.attributes["aria-busy"] = "true"
-				else:
-					section.children[(By.CSS_SELECTOR, '[aria-busy="true"], [role="progressbar"], [role="spinner"], [role="status"]')] = [FakeElement(attributes={"role": "progressbar"})]
-				with self.assertRaises(element_selectors.ElementNotReady):
-					h.tasks.elements.get_search_now_link_from_visual_search_sidebar()
+				section.attributes["role"] = "dialog"
+				h.action.attributes["href"] = "https://www.bing.com/"
+				section.children[(By.CSS_SELECTOR, HEADINGS)].append(FakeElement(text="How it works"))
+				section.children[(By.TAG_NAME, "button")] = [FakeElement(attributes={"aria-label": "Close"}), FakeElement(text="How it works")]
+				section.children[(By.CSS_SELECTOR, '[aria-busy="true"], [role="progressbar"], [role="spinner"], [role="status"]')] = [FakeElement(text="Loading...", attributes={"role": role})]
+				end = h.run()
+				self.assertEqual((end["outcome"], end["reason_key"]), ("ok", None))
+				self.assertEqual(h.clicked[:3], [h.earn, h.tiles[3], h.action])
+				self.assertEqual(h.upload_calls, 1)
+
+	def test_identified_panel_without_action_is_not_ready(self):
+		h = Harness()
+		h.driver.children[(By.TAG_NAME, "section")][0].children[(By.TAG_NAME, "a")] = []
+		with self.assertRaises(element_selectors.ElementNotReady):
+			h.tasks.elements.get_search_now_link_from_visual_search_sidebar()
+
+	def test_observed_search_action_arrives_after_title_and_waits(self):
+		h = Harness()
+		section = h.driver.children[(By.TAG_NAME, "section")][0]
+		section.attributes["role"] = "dialog"
+		section.children[(By.CSS_SELECTOR, HEADINGS)].append(FakeElement(text="How it works"))
+		find, reads = section.find_elements, []
+		def hydrate(by, selector):
+			if (by, selector) == (By.TAG_NAME, "a"):
+				reads.append(None)
+				return [] if len(reads) < 3 else [h.action]
+			return find(by, selector)
+		section.find_elements = hydrate
+		wait = RealWait
+		with mock.patch(__name__ + ".RealWait", lambda driver, timeout: wait(driver, 0.2, poll_frequency=0.01)):
+			end = h.run()
+		self.assertEqual(end["outcome"], "ok")
+		self.assertEqual(h.upload_calls, 1)
+		self.assertGreaterEqual(len(reads), 3)
 
 	def test_absent_tile_skips_without_clicking_app_or_generating_image(self):
 		h = Harness(titles=SLIMDEBUG)
