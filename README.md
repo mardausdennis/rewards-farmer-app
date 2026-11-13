@@ -13,7 +13,7 @@ Underneath it runs [User0332/rewards-farmer](https://github.com/User0332/rewards
 
 You need Windows 10 or 11 (64-bit) and Microsoft Edge
 
-1. Download `RewardsFarmer-0.1.0-windows-x64-Setup.exe` from the [latest release](https://github.com/mardausdennis/rewards-farmer-app/releases/latest)
+1. Download `RewardsFarmer-0.3.8-windows-x64-Setup.exe` from the [latest release](https://github.com/mardausdennis/rewards-farmer-app/releases/latest)
 2. Run it. It installs for your Windows user only, no admin rights needed. The file isnt signed, so Windows may say "Windows protected your PC". Click **More info**, then **Run anyway**
 3. Open **Rewards Farmer** from the Start menu and go through the three steps: sign in, pick a schedule, done
 
