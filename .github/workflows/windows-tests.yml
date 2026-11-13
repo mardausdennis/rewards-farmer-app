@@ -99,7 +99,8 @@ jobs:
   app:
     name: App unit and UI tests
     runs-on: windows-latest
-    timeout-minutes: 45
+    # The 25 Oct job took 36-39 minutes; UI tests grew 15% and other app tests 34%.
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
