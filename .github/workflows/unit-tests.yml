@@ -13,6 +13,8 @@ jobs:
   tests:
     name: All platform-agnostic tests
     runs-on: ubuntu-latest
+    # Healthy runs took minutes; the nested isolation suite already caps at 10.
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
