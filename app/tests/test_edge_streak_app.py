@@ -15,7 +15,13 @@ import run_record
 
 
 class EdgeSettingTests(unittest.TestCase):
-	setUp = setting_fixtures.SettingsTests.setUp
+	def setUp(self):
+		setting_fixtures.SettingsTests.setUp(self)
+		# Slot arithmetic must not require a Windows user's task identity.
+		task_name = patch("rfapp.schedule.paths.task_name",return_value="RewardsFarmerApp_test0000")
+		task_name.start()
+		self.addCleanup(task_name.stop)
+
 	envfile = setting_fixtures.SettingsTests.envfile
 
 	def test_default_off_and_three_way_bridge_roundtrip(self):
@@ -45,20 +51,20 @@ class EdgeSettingTests(unittest.TestCase):
 			("scheduled", "17:45", "fill", False), ("scheduled", "22:30", "fill", False),
 			("run_now", "21:45", "fill", False), ("check_now", "21:45", "fill", False),
 			("scheduled", "21:45", "off", False), ("scheduled", "21:45", "remind", False)):
-			at = datetime.fromisoformat("2026-11-11T" + clock + ":00+01:00")
+			at = datetime.fromisoformat("2026-11-11T" + clock + ":00").astimezone()
 			plan = edge_streak.plan({**values, "run.edge_streak":mode}, kind, at, elapsed_seconds=0, accounts=1,
 				account_ids=["account-1"],user_data_dir=self.root / "profile")
 			self.assertEqual(plan["enabled"], enabled, (kind,clock,mode))
 			self.assertEqual(plan["env"]["EDGE_BROWSING_STREAK"], str(enabled).lower())
 			if enabled: self.assertEqual(plan["env"]["REWARDS_HEADLESS"], "true")
-		late = edge_streak.plan(values, "scheduled", datetime(2026,11,11,21,45), elapsed_seconds=2500, accounts=2,
+		late = edge_streak.plan(values, "scheduled", datetime(2026,11,11,21,45).astimezone(), elapsed_seconds=2500, accounts=2,
 			account_ids=["account-1"],user_data_dir=self.root / "profile")
 		self.assertTrue(late["enabled"])
 		self.assertLessEqual(2500 + 2 * float(late["env"]["EDGE_BROWSING_STREAK_MAX_MINUTES"]) * 60 + 300, 3590)
 		self.assertFalse(edge_streak.plan(values, "scheduled", datetime(2026,11,11,21,45), elapsed_seconds=3280, accounts=1)["enabled"])
 
 	def record(self, day, **changes):
-		stamp = day + "T21:45:00+01:00"
+		stamp = datetime.fromisoformat(day + "T21:45:00").astimezone().isoformat()
 		identity = datetime.fromisoformat(stamp).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-aaaa"
 		base = {"v":run_record.SCHEMA_VERSION, "run_id":identity, "ts":stamp}
 		observation = dict(outcome="incomplete", maximum_reached=True, final_read_success=True,
@@ -200,7 +206,7 @@ class EdgeSettingTests(unittest.TestCase):
 		self.evaluate("2026-11-10")
 		identity, events = self.record("2026-11-10", minutes_after=5)
 		for event in events:
-			event["ts"] = "2026-11-10T22:00:00+01:00"
+			event["ts"] = datetime(2026,11,10,22).astimezone().isoformat()
 		edge_streak.process_run(identity[:-4] + "bbbb", events, user_data_dir=str(self.root / "profiles"))
 		self.evaluate("2026-11-11")
 		self.assertEqual(settings.load()["run.edge_streak"], "fill")
@@ -219,9 +225,11 @@ class EdgeSupervisorTests(unittest.TestCase):
 	def setUp(self):
 		supervisor_fixtures.SupervisorTests.setUp(self)
 		self.stack.enter_context(patch("rfapp.edge_streak.process_age",return_value=0))
+		self.stack.enter_context(patch("rfapp.schedule.paths.task_name",return_value="RewardsFarmerApp_test0000"))
 
-	def prior_state(self, *, account="account-1", stamp="2026-11-11T13:45:00+01:00", tile=True, minutes=4, target=30):
-		at = datetime.fromisoformat(stamp)
+	def prior_state(self, *, account="account-1", stamp=None, tile=True, minutes=4, target=30):
+		at = datetime.fromisoformat(stamp) if stamp else datetime(2026,11,11,13,45).astimezone()
+		stamp = at.isoformat()
 		run_id = at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-aaaa"
 		base = {"v":run_record.SCHEMA_VERSION,"run_id":run_id,"ts":stamp}
 		events = [dict(base,type="run_start",trigger="scheduled",accounts=[account],plan={}),
@@ -241,7 +249,8 @@ class EdgeSupervisorTests(unittest.TestCase):
 		inherited = {key:value for key,value in os.environ.items() if key != "REWARDS_HEADLESS"}
 		if chosen is not None: inherited["REWARDS_HEADLESS"] = chosen
 		with patch.object(supervisor,"datetime") as dates, patch.object(supervisor,"_wait_until_available",return_value=None), patch.object(supervisor,"Job"), patch.object(supervisor.paths,"farmer_command",return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc) as popen, patch.dict(os.environ,inherited,clear=True):
-			dates.now.return_value = datetime(2026,11,11,21,50,tzinfo=timezone(timedelta(hours=1)))
+			# supervise() converts now() to the machine's zone, as in a real run.
+			dates.now.return_value = datetime(2026,11,11,21,50).astimezone()
 			self.assertEqual(supervisor.supervise("scheduled"),0)
 		return popen.call_args.kwargs["env"]
 
@@ -274,7 +283,7 @@ class EdgeSupervisorTests(unittest.TestCase):
 
 
 	def test_fill_with_yesterdays_tile_keeps_browser_choice(self):
-		self.prior_state(stamp="2026-11-10T13:45:00+01:00")
+		self.prior_state(stamp=datetime(2026,11,10,13,45).astimezone().isoformat())
 		env = self.evening_env("false")
 		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
 		self.assertEqual(env["REWARDS_HEADLESS"],"false")
@@ -298,14 +307,14 @@ class EdgeSupervisorTests(unittest.TestCase):
 		for tile, minutes, target in ((False,None,None),(None,None,None),(True,None,30),(True,4,None)):
 			with self.subTest(tile=tile,minutes=minutes,target=target):
 				self.prior_state()
-				self.prior_state(stamp="2026-11-11T17:45:00+01:00",tile=tile,minutes=minutes,target=target)
+				self.prior_state(stamp=datetime(2026,11,11,17,45).astimezone().isoformat(),tile=tile,minutes=minutes,target=target)
 				env = self.evening_env("false")
 				self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
 				self.assertEqual(env["REWARDS_HEADLESS"],"false")
 
 
 	def test_current_evening_observation_does_not_grant_its_own_topup(self):
-		self.prior_state(stamp="2026-11-11T21:46:00+01:00")
+		self.prior_state(stamp=datetime(2026,11,11,21,46).astimezone().isoformat())
 		env = self.evening_env("false")
 		self.assertEqual(env["EDGE_BROWSING_STREAK"],"false")
 		self.assertEqual(env["REWARDS_HEADLESS"],"false")
@@ -323,10 +332,10 @@ class EdgeSupervisorTests(unittest.TestCase):
 		self.active_accounts = ["account-1","account-2"]
 		self.prior_state()
 		# Separate run id to avoid replacing the first profile's observation.
-		self.prior_state(account="account-2",stamp="2026-11-11T13:46:00+01:00",tile=False,minutes=None,target=None)
+		self.prior_state(account="account-2",stamp=datetime(2026,11,11,13,46).astimezone().isoformat(),tile=False,minutes=None,target=None)
 		proc = SimpleNamespace(pid=123,returncode=0,poll=lambda:0)
 		with patch.object(supervisor,"datetime") as dates, patch.object(supervisor,"_wait_until_available",return_value=None), patch.object(supervisor,"Job"), patch.object(supervisor.paths,"farmer_command",return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc) as popen, patch.dict(os.environ,{"REWARDS_HEADLESS":"false"}):
-			dates.now.return_value = datetime(2026,11,11,21,50,tzinfo=timezone(timedelta(hours=1)))
+			dates.now.return_value = datetime(2026,11,11,21,50).astimezone()
 			self.assertEqual(supervisor.supervise("scheduled"),0)
 		envs = {call.kwargs["env"]["REWARDS_ACCOUNTS"]:call.kwargs["env"] for call in popen.call_args_list}
 		self.assertEqual(set(envs),{"account-1","account-2"})
@@ -340,7 +349,7 @@ class EdgeSupervisorTests(unittest.TestCase):
 		for kind, hour, mode, enabled in (("scheduled",21,"fill",True), ("scheduled",17,"fill",False),
 			("scheduled",21,"remind",False), ("scheduled",21,"off",False), ("run_now",21,"fill",False), ("check_now",21,"fill",False)):
 			self.settings["run.edge_streak"] = mode
-			at = datetime(2026,11,11,hour,50,tzinfo=timezone(timedelta(hours=1)))
+			at = datetime(2026,11,11,hour,50).astimezone()
 			proc = SimpleNamespace(pid=123,returncode=0,poll=lambda:0)
 			with patch.object(supervisor, "datetime") as dates, patch.object(supervisor, "_wait_until_available", return_value=None), patch.object(supervisor, "Job"), patch.object(supervisor.paths, "farmer_command", return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc) as popen, patch.dict(os.environ,{"EDGE_BROWSING_STREAK":"true"}):
 				dates.now.return_value = at
@@ -355,10 +364,18 @@ class EdgeSupervisorTests(unittest.TestCase):
 		self.prior_state()
 		clock, ended = [0.0], []
 		proc = SimpleNamespace(pid=123,returncode=None)
-		proc.poll = lambda:proc.returncode
+		polls = [0]
+		def poll():
+			# This child never exits by itself. A missed budget must fail CI,
+			# even if a regression stops advancing the simulated clock too.
+			polls[0] += 1
+			self.assertLessEqual(polls[0],edge_streak.HARD_STOP_SECONDS + 10,"Fake farmer exceeded bounded poll count")
+			return proc.returncode
+		proc.poll = poll
 		def wait(timeout):
 			if proc.returncode is None:
 				clock[0] += timeout
+				self.assertLessEqual(clock[0],edge_streak.HARD_STOP_SECONDS + 5,"Fake farmer exceeded supervisor hard stop")
 				raise supervisor.subprocess.TimeoutExpired("fake",timeout)
 		proc.wait = wait
 		def terminate():
@@ -368,7 +385,7 @@ class EdgeSupervisorTests(unittest.TestCase):
 			clock[0] += 2400
 			return {"state":3,"waited_s":2400,"gave_up":False}
 		with patch.object(supervisor,"datetime") as dates, patch.object(supervisor.time,"monotonic",side_effect=lambda:clock[0]), patch.object(supervisor,"_wait_until_available",side_effect=defer), patch.object(supervisor,"Job") as jobs, patch.object(supervisor.paths,"farmer_command",return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc) as popen:
-			dates.now.return_value = datetime(2026,11,11,21,50,tzinfo=timezone(timedelta(hours=1)))
+			dates.now.return_value = datetime(2026,11,11,21,50).astimezone()
 			jobs.return_value.terminate.side_effect = terminate
 			self.assertEqual(supervisor.supervise("scheduled"),1)
 			maximum = float(popen.call_args.kwargs["env"]["EDGE_BROWSING_STREAK_MAX_MINUTES"])
@@ -382,7 +399,7 @@ class EdgeSupervisorTests(unittest.TestCase):
 		self.active_accounts = ["account-1"]
 		proc = SimpleNamespace(pid=123,returncode=0,poll=lambda:0)
 		with patch.object(supervisor,"datetime") as dates, patch.object(supervisor,"Job"), patch.object(supervisor.paths,"farmer_command",return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc), patch.object(edge_streak,"process_run",side_effect=OSError("SYNTHETIC_SECRET")):
-			dates.now.return_value = datetime(2026,11,11,21,50,tzinfo=timezone(timedelta(hours=1)))
+			dates.now.return_value = datetime(2026,11,11,21,50).astimezone()
 			self.assertEqual(supervisor.supervise("scheduled"),0)
 		events = [event for path in self.folder.glob("*.jsonl") for event in run_record.read_events(str(path))]
 		self.assertEqual(next(event for event in events if event["type"] == "edge_streak_policy_error")["error"],"OSError")
@@ -393,7 +410,7 @@ class EdgeSupervisorTests(unittest.TestCase):
 		self.active_accounts = ["account-1"]
 		proc = SimpleNamespace(pid=123,returncode=0,poll=lambda:0)
 		with patch.object(supervisor,"datetime") as dates, patch("rfapp.edge_streak.process_age",return_value=None), patch.object(supervisor,"Job"), patch.object(supervisor.paths,"farmer_command",return_value=["fake"]), patch.object(supervisor.subprocess,"Popen",return_value=proc) as popen:
-			dates.now.return_value = datetime(2026,11,11,21,50,tzinfo=timezone(timedelta(hours=1)))
+			dates.now.return_value = datetime(2026,11,11,21,50).astimezone()
 			self.assertEqual(supervisor.supervise("scheduled"),0)
 		self.assertEqual(popen.call_args.kwargs["env"]["EDGE_BROWSING_STREAK"],"false")
 

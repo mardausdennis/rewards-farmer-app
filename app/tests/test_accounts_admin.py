@@ -440,12 +440,17 @@ class AccountsAdminTests(unittest.TestCase):
 		self.accounts(["account-1"])
 		path = self.root / "runs" / "20261014T100000Z-abcd.jsonl"
 		path.parent.mkdir()
-		append_event(str(path), "account_start", "20261014T100000Z-abcd", account="account-1", profile=str(self.profiles / "account-1"))
-		append_event(str(path), "state", "20261014T100000Z-abcd", account="account-1", balance=10, unreadable="signed_out")
-		signin._write_status("account-1", "signed_in")
-		row = admin._list_accounts()[0]
-		self.assertTrue(row["signed_in"])
-		self.assertEqual(row["balance"], 10)
+		with patch("run_record._timestamp",return_value="2026-10-14T10:00:00.000Z"):
+			append_event(str(path), "account_start", "20261014T100000Z-abcd", account="account-1", profile=str(self.profiles / "account-1"))
+			append_event(str(path), "state", "20261014T100000Z-abcd", account="account-1", balance=10, unreadable="signed_out")
+		# Real writes can share a millisecond; only strictly newer evidence wins.
+		for milliseconds, expected in ((-1,False),(0,False),(1,True)):
+			with self.subTest(milliseconds=milliseconds), patch.object(signin,"datetime") as dates:
+				dates.now.return_value = datetime(2026,10,14,10,tzinfo=timezone.utc) + timedelta(milliseconds=milliseconds)
+				signin._write_status("account-1", "signed_in")
+				row = admin._list_accounts()[0]
+				self.assertEqual(row["signed_in"],expected)
+				self.assertEqual(row["balance"],10)
 
 	def test_newer_signed_out_run_is_not_hidden_by_older_successful_signin(self):
 		from run_record import append_event
