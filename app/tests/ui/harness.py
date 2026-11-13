@@ -280,10 +280,25 @@ class UiHarness:
 
 	def wait_ready(self, timeout=20):
 		from selenium.webdriver.support.ui import WebDriverWait
+		reloaded = False
 		def ready(browser):
+			nonlocal reloaded
 			state = browser.execute_script("return {ready:document.getElementById('app').dataset.ready,busy:document.getElementById('view').getAttribute('aria-busy')} ")
 			if state.get("ready") == "error":
-				raise RuntimeError("Shell initialization failed: " + json.dumps(self.errors()))
+				dropped = []
+				errors = self.errors(dropped_resources=dropped)
+				origin = f"http://127.0.0.1:{self.server.server_port}" if self.server is not None else None
+				fetch_failure = (re.escape(origin + "/js/main.js") + r' \d+:\d+ "App initialization failed" TypeError: Failed to fetch(?:\n\s+at [^\n]+)*') if origin else None
+				if (not reloaded and dropped and errors and not self._transport_cap_exceeded and fetch_failure
+					and all(re.fullmatch(fetch_failure, error) for error in errors)):
+					# errors() already charged each verified resource against the module
+					# cap. Recover its broken start once, within the original wait budget.
+					reloaded = True
+					print("harness_transport_reload " + json.dumps({"test": _current_test_id(),
+						"url": browser.current_url, "resources": dropped}, sort_keys=True), flush=True)
+					browser.refresh()
+					return False
+				raise RuntimeError("Shell initialization failed: " + json.dumps(errors))
 			return state.get("ready") == "true" and state.get("busy") == "false"
 		try:
 			WebDriverWait(self.driver, timeout).until(ready)
@@ -321,7 +336,7 @@ class UiHarness:
 			"""))
 		return focused
 
-	def errors(self):
+	def errors(self, *, dropped_resources=None):
 		# A partial source locale legitimately fetches missing namespaces as 404.
 		# A loopback transport row needs an independent byte proof, never a blanket retry.
 		errors = []
@@ -345,6 +360,8 @@ class UiHarness:
 			dropped = verified and not self._transport_cap_exceeded
 			if dropped:
 				self.transport_dropped += 1
+				if dropped_resources is not None:
+					dropped_resources.append({"url": url, "error": code})
 			else:
 				errors.append(message)
 			print("harness_transport_error " + json.dumps({"test": _current_test_id(), "sequence": self._transport_observed,

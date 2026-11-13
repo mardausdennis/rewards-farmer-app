@@ -22,6 +22,11 @@ def resource_row(code="ERR_CONNECTION_RESET", url="http://127.0.0.1:32123/img/ap
 		"message": f"{url} - Failed to load resource: net::{code}"}
 
 
+def initialization_row():
+	return {"level": "SEVERE", "source": "console-api",
+		"message": 'http://127.0.0.1:32123/js/main.js 103:12 "App initialization failed" TypeError: Failed to fetch\n    at loadCatalog (http://127.0.0.1:32123/js/i18n.js:36:28)'}
+
+
 class TransportRowTests(unittest.TestCase):
 	def setUp(self):
 		self.owned = harness.UiHarness()
@@ -222,6 +227,108 @@ class TransportRowTests(unittest.TestCase):
 			self.owned.stop()
 		self.assertEqual(1, self.output.getvalue().count("harness_transport_summary dropped=0"))
 
+	def readiness(self, rows, *, again=None):
+		self.owned.driver.current_url = "http://127.0.0.1:32123/index.html?mock=shell/overview#/overview"
+		self.owned.driver.get_log.side_effect = [rows, [] if again is None else again, []]
+		self.owned.driver.execute_script.side_effect = [{"ready": "error", "busy": "true"},
+			{"ready": "true" if again is None else "error", "busy": "false"}]
+		case = self
+		class Wait:
+			def __init__(self, driver, timeout):
+				case.assertEqual(20, timeout)
+				self.driver = driver
+			def until(self, condition):
+				for _ in range(2):
+					if condition(self.driver):
+						return True
+				raise AssertionError("Readiness did not converge in two evaluations")
+		# Decision tests need no Selenium installation or browser, and must not
+		# import urllib3 while the static refetch's HTTPConnection is patched.
+		with patch.dict("sys.modules", {"selenium.webdriver.support.ui": SimpleNamespace(WebDriverWait=Wait)}), redirect_stdout(self.output):
+			return self.owned.wait_ready()
+
+	def reloads(self):
+		return [json.loads(line.removeprefix("harness_transport_reload "))
+			for line in self.output.getvalue().splitlines() if line.startswith("harness_transport_reload ")]
+
+	def test_verified_drop_that_broke_start_reloads_once_and_keeps_its_cap_charge(self):
+		row = resource_row()
+		self.assertIs(self.owned, self.readiness([row, initialization_row()]))
+		self.owned.driver.refresh.assert_called_once_with()
+		self.assertEqual(2, self.owned.driver.execute_script.call_count)
+		self.assertEqual(1, self.owned.transport_dropped)
+		self.assertEqual(1, self.owned._transport_verified)
+		self.assertEqual([{"test": self.id(), "url": self.owned.driver.current_url,
+			"resources": [{"url": row["message"].split(" - ")[0], "error": "ERR_CONNECTION_RESET"}]}], self.reloads())
+		self.assertIs(True, self.records()[0]["dropped"])
+		# A successful reload does not refund the resource or create a new cap.
+		self.owned.driver.get_log.side_effect = None
+		self.assertEqual([], self.errors([row] * (harness.TRANSPORT_DROP_LIMIT - 1)))
+		self.assertIn(row["message"], self.errors([row]))
+		self.assertTrue(self.owned._transport_cap_exceeded)
+
+	def test_unverified_start_transport_never_reloads(self):
+		for status, body, exception in ((200, b"different", None), (500, self.expected, None),
+			(200, self.expected, ConnectionRefusedError("synthetic refusal"))):
+			with self.subTest(status=status, exception=type(exception).__name__):
+				self.response.status, self.body = status, body
+				self.connection.getresponse.side_effect = exception
+				with self.assertRaisesRegex(RuntimeError, "Shell initialization failed"):
+					self.readiness([resource_row(), initialization_row()])
+				self.owned.driver.refresh.assert_not_called()
+		self.assertEqual([], self.reloads())
+		self.assertEqual(0, self.owned.transport_dropped)
+
+	def test_other_readiness_errors_stay_red_despite_a_verified_drop(self):
+		for message in ('http://127.0.0.1:32123/js/main.js 103:12 "App initialization failed" TypeError: wrong setting',
+			'http://127.0.0.1:32123/js/other.js 103:12 "App initialization failed" TypeError: Failed to fetch',
+			'http://elsewhere/js/main.js 103:12 "App initialization failed" TypeError: Failed to fetch',
+			'Uncaught Error: other JavaScript failure', 'Missing translation key: shell.synthetic'):
+			with self.subTest(message=message):
+				self.owned.transport_dropped = self.owned._transport_verified = 0
+				other = {"level": "SEVERE", "source": "console-api", "message": message}
+				with self.assertRaisesRegex(RuntimeError, "Shell initialization failed"):
+					self.readiness([resource_row(), initialization_row(), other])
+				self.owned.driver.refresh.assert_not_called()
+		self.assertEqual([], self.reloads())
+
+	def test_start_fetch_failure_requires_a_drop_in_the_same_readiness_wait(self):
+		# A drop consumed by an earlier errors() call is not this start's proof.
+		self.assertEqual([], self.errors([resource_row()]))
+		with self.assertRaisesRegex(RuntimeError, "Shell initialization failed"):
+			self.readiness([initialization_row()])
+		self.owned.driver.refresh.assert_not_called()
+		self.assertEqual([], self.reloads())
+
+	def test_verified_drop_without_the_own_start_fetch_failure_never_reloads(self):
+		with self.assertRaisesRegex(RuntimeError, "Shell initialization failed"):
+			self.readiness([resource_row()])
+		self.owned.driver.refresh.assert_not_called()
+		self.assertEqual([], self.reloads())
+
+	def test_second_start_failure_is_red_even_with_another_verified_drop(self):
+		rows = [resource_row(), initialization_row()]
+		with self.assertRaisesRegex(RuntimeError, "Shell initialization failed"):
+			self.readiness(rows, again=rows)
+		self.owned.driver.refresh.assert_called_once_with()
+		self.assertEqual(1, len(self.reloads()))
+		self.assertEqual(2, self.owned.transport_dropped)
+
+	def test_start_recovery_past_module_cap_stays_red_without_reload(self):
+		self.assertEqual([], self.errors([resource_row()] * harness.TRANSPORT_DROP_LIMIT))
+		with self.assertRaisesRegex(RuntimeError, "exceeded module limit 3"):
+			self.readiness([resource_row(), initialization_row()])
+		self.owned.driver.refresh.assert_not_called()
+		self.assertEqual([], self.reloads())
+		self.assertTrue(self.owned._transport_cap_exceeded)
+
+	def test_unverified_row_cannot_hide_beside_a_verified_start_drop(self):
+		row = resource_row("ERR_FAILED")
+		with self.assertRaisesRegex(RuntimeError, "ERR_FAILED"):
+			self.readiness([resource_row(), row, initialization_row()])
+		self.owned.driver.refresh.assert_not_called()
+		self.assertEqual([], self.reloads())
+
 
 class TcpSnapshotTests(unittest.TestCase):
 	def test_windows_counts_states_without_logging_endpoints(self):
@@ -317,6 +424,56 @@ class BrowserTransportTests(unittest.TestCase):
 		self.assertIs(True, records[0]["bytes_equal"])
 		self.assertIn(records[0]["error"], harness.TRANSPORT_CODES)
 		self.assertEqual(self.id(), records[0]["test"])
+
+	def test_catalog_reset_that_breaks_start_reloads_the_same_page_once(self):
+		self.owned.open("#/overview", "shell/overview").wait_ready()
+		self.assertEqual([], self.owned.errors())
+		self.owned.driver.execute_cdp_cmd("Network.enable", {})
+		self.owned.driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": True})
+		original = harness._Handler.do_GET
+		state = {"resets": 0, "refetches": 0, "reloads": 0}
+		def fault(handler):
+			if handler.server is self.owned.server and urlsplit(handler.path).path == "/i18n/en/setup.json":
+				if handler.headers.get("Connection", "").lower() == "close":
+					state["refetches"] += 1
+				elif not state["reloads"]:
+					state["resets"] += 1
+					handler.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("hh" if os.name == "nt" else "ii", 1, 0))
+					handler.close_connection = True
+					handler.connection.close()
+					return
+			return original(handler)
+		refresh = self.owned.driver.refresh
+		def reload():
+			state["reloads"] += 1
+			return refresh()
+		output = io.StringIO()
+		before = self.owned.transport_dropped
+		page = self.owned.url("#/overview", "shell/overview", lang="x-rtl")
+		try:
+			with patch.object(harness._Handler, "do_GET", fault), patch.object(self.owned.driver, "refresh", side_effect=reload) as refreshed:
+				self.owned.open("#/overview", "shell/overview", lang="x-rtl")
+				with redirect_stdout(output):
+					self.owned.wait_ready()
+				refreshed.assert_called_once_with()
+		finally:
+			self.owned.driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": False})
+		print(output.getvalue(), end="", flush=True)
+		print("harness_transport_start_fixture " + json.dumps(state, sort_keys=True), flush=True)
+		reloads = [json.loads(line.removeprefix("harness_transport_reload ")) for line in output.getvalue().splitlines() if line.startswith("harness_transport_reload ")]
+		self.assertEqual(1, len(reloads))
+		self.assertEqual(self.id(), reloads[0]["test"])
+		self.assertEqual(page, reloads[0]["url"])
+		self.assertEqual(1, len(reloads[0]["resources"]))
+		self.assertTrue(reloads[0]["resources"][0]["url"].endswith("/i18n/en/setup.json"))
+		self.assertIn(reloads[0]["resources"][0]["error"], harness.TRANSPORT_CODES)
+		self.assertGreaterEqual(state["resets"], 1)
+		self.assertEqual(1, state["refetches"])
+		self.assertEqual(1, state["reloads"])
+		self.assertEqual(before + 1, self.owned.transport_dropped)
+		self.assertEqual(page, self.owned.driver.current_url)
+		self.assertEqual("true", self.owned.driver.execute_script("return document.getElementById('app').dataset.ready"))
+		self.assertEqual([], self.owned.errors())
 
 	def test_reset_every_request_stays_red(self):
 		self.owned.open("#/overview", "shell/overview").wait_ready()
