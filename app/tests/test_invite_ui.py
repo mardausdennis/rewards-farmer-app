@@ -78,9 +78,9 @@ class InviteUiTests(unittest.TestCase):
 		self.assertIsNotNone(node)
 		ui = Path(__file__).resolve().parents[1] / "ui"
 		program = r"""
-import fs from 'node:fs/promises';import {pathToFileURL} from 'node:url';
+import fs from 'node:fs/promises';import {pathToFileURL,fileURLToPath} from 'node:url';
 const root=process.argv[1];globalThis.window={location:{search:'?mock=accounts/invite-onboarding'},addEventListener(){},dispatchEvent(){}};
-globalThis.fetch=async url=>({ok:true,json:async()=>JSON.parse(await fs.readFile(String(url).replace('file:///',''),'utf8'))});
+globalThis.fetch=async url=>({ok:true,json:async()=>JSON.parse(await fs.readFile(fileURLToPath(url),'utf8'))});
 const module=await import(pathToFileURL(root+'/js/mock-bridge.js'));await module.install();const result={};
 for(const name of ['preview_invite_account','start_invite_account','continue_invite_account','discard_invite_account','list_invite_operations'])result[name]=await window.pywebview.api[name]({});
 console.log(JSON.stringify(result));
