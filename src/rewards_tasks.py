@@ -978,8 +978,8 @@ class RewardsTaskUtils:
 			self._balance_last_host = None
 			return None
 
-	def _prepare_balance_page(self, deadline, clock, cleanup_deadline=None):
-		if self._balance_host() in (None, "rewards.bing.com"):
+	def _prepare_balance_page(self, deadline, clock, cleanup_deadline=None, *, reload_blank=False):
+		if not reload_blank and self._balance_host() in (None, "rewards.bing.com"):
 			return "not_needed"
 		# Each task selects its own earn/dashboard section at entry. Returning
 		# an off-site main tab home cannot discard input its successor needs.
@@ -994,7 +994,9 @@ class RewardsTaskUtils:
 				return "timed_out"
 			self.driver.set_page_load_timeout(min(previous_timeout, remaining))
 			try:
-				self.driver.get(REWARDS_HOME_URL)
+				if reload_blank:
+					self._balance_blank_reloaded = True
+				self.driver.get(REWARDS_HOME_URL + "earn" if reload_blank else REWARDS_HOME_URL)
 				return "returned"
 			except TimeoutException:
 				# A page-load timeout can still leave a readable header.
@@ -1031,6 +1033,7 @@ class RewardsTaskUtils:
 		initial_host = getattr(self, "_balance_last_host", None)
 		navigation = "not_attempted"
 		attempts, reader_error = 0, False
+		reloaded = False
 		elements = getattr(self, "elements", None)
 		if elements is not None:
 			elements.balance_observation = None
@@ -1054,9 +1057,37 @@ class RewardsTaskUtils:
 							reader_error = False
 							if type(balance) is int and balance >= 0 and clock() <= command_deadline:
 								self._balance_timed_out = False
+								if reloaded:
+									self._balance_read_diagnostic = {"status": "readable", "attempts": attempts,
+										"elapsed_ms": round((clock() - began) * 1000), "initial_host": initial_host,
+										"host": getattr(self, "_balance_last_host", None), "navigation": navigation, "reader_error": False,
+										"wait_mode": "poll", "budget_remaining_ms": round(max(0, budget - (clock() - began)) * 1000),
+										"observation": getattr(elements, "balance_observation", None), "reloaded": True}
 								return balance
 						except Exception:
 							reader_error = True
+						if (attempts == 1 and prepare and timeout > 0 and not getattr(self, "_balance_blank_reloaded", False)
+							and initial_host == "rewards.bing.com" and clock() < deadline):
+							try:
+								packet = page_structure.snapshot(self.driver)
+								blank = (packet["complete"] and packet["rewards_host"] and not packet["rendered"]
+									and not any(packet["counts"].values()) and not any(packet["matched"].values()))
+							except Exception:
+								blank = False
+							if blank:
+								# A URL on Rewards is not proof of a usable document. Recover
+								# only a proven empty page, once per run, without replaying a task.
+								page_structure.capture_once(self.driver, "balance", packet=packet)
+								navigation = self._prepare_balance_page(deadline, clock, began + budget, reload_blank=True)
+								reloaded = getattr(self, "_balance_blank_reloaded", False)
+								if reloaded:
+									try:
+										packet = page_structure.snapshot(self.driver)
+										page_structure.capture_once(self.driver, "balance", attempt=2, reloaded=True, packet=packet)
+									except Exception:
+										pass
+									immediate = False
+								continue
 						remaining = deadline - clock() - transport_margin
 						if immediate or remaining <= 0:
 							break
@@ -1072,7 +1103,7 @@ class RewardsTaskUtils:
 			"elapsed_ms": round((clock() - began) * 1000), "initial_host": initial_host,
 			"host": getattr(self, "_balance_last_host", None), "navigation": navigation, "reader_error": reader_error,
 			"wait_mode": "immediate" if immediate else "poll", "budget_remaining_ms": round(self._balance_remaining * 1000),
-			"observation": getattr(elements, "balance_observation", None)}
+			"observation": getattr(elements, "balance_observation", None), **({"reloaded": True} if reloaded else {})}
 		page_structure.capture_once(self.driver, "balance")
 		return None
 
@@ -1082,6 +1113,7 @@ class RewardsTaskUtils:
 		# must not take the remaining ones down with it.
 		self._balance_remaining = BALANCE_RUN_BUDGET
 		self._balance_timed_out = False
+		self._balance_blank_reloaded = False
 		have_before = False
 		before, before_diagnostic = None, None
 		import edge_browsing_streak
