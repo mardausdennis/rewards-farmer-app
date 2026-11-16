@@ -698,7 +698,7 @@ class ScheduledAvailabilityTests(unittest.TestCase):
 			supervisor._set_execution_state(0x80000001)
 
 
-def _run_isolation_child(command, *, env=None, cwd=None, no_progress_timeout=180, total_timeout=900):
+def _run_isolation_child(command, *, env=None, cwd=None, no_progress_timeout=180, total_timeout=2400):
 	"""Drain both pipes while only test-start lines renew the progress deadline."""
 	began = time.monotonic()
 	prefix = "FARMER_ISOLATION_TEST "
@@ -911,12 +911,13 @@ raise SystemExit(0 if result.wasSuccessful() and not violations else 1)
 		# The guard lives only in this test child, never in the product entrypoint.
 		env = dict(os.environ)
 		env.pop("REWARDS_APP_UI_TESTS", None)
-		# On 2026-11-16 the 600 s total cut off a progressing suite under measured
-		# shared load; an idle nested run took 467 s on 2026-11-13. Its last test,
-		# cached/uncached overview equality, took 7.58 s in a focused run today.
-		# Allow 180 s without a test-start line (>23x that sample), not just 25%
-		# total headroom. Keep a 900 s outer cap: the 60 min Windows job needs
-		# 2111 s for UI, leaving 589 s for other unit tests and setup after this cap.
+		# On 2026-11-16 shared load left about 53% of non-UI tests covered at
+		# 600 s, implying roughly 1100-1150 s total. Give progressing runs 2400 s.
+		# Keep 180 s without a test-start line (>23x today's 7.58 s focused
+		# overview sample); this catches a hang inside the 60 min Windows job.
+		# With 2111 s for UI plus setup and other unit tests, a hosted nested run
+		# slower than about 1250 s hits the job cap before this test's total cap.
+		# Hosted runs are far from that: the whole unit step took 566 s.
 		proc, summary, failure = _run_isolation_child([sys.executable, "-c", code, str(Path(__file__).parent)],
 			env=env, cwd=Path(__file__).resolve().parents[2])
 		print(summary, flush=True)
