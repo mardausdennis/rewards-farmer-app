@@ -698,6 +698,159 @@ class ScheduledAvailabilityTests(unittest.TestCase):
 			supervisor._set_execution_state(0x80000001)
 
 
+def _run_isolation_child(command, *, env=None, cwd=None, no_progress_timeout=180, total_timeout=900):
+	"""Drain both pipes while only test-start lines renew the progress deadline."""
+	began = time.monotonic()
+	prefix = "FARMER_ISOLATION_TEST "
+	condition = threading.Condition()
+	progress = {"at": began, "done": False}
+	stdout, stderr = [], []
+	bound = None
+	with subprocess.Popen(command, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+		text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0) as proc:
+		def read_stdout():
+			stdout.append(proc.stdout.read())
+		def read_stderr():
+			for line in proc.stderr:
+				stderr.append(line)
+				if line.startswith(prefix) and line[len(prefix):].strip():
+					with condition:
+						progress["at"] = time.monotonic()
+						condition.notify_all()
+		def wait_exit():
+			proc.wait()
+			with condition:
+				progress["done"] = True
+				condition.notify_all()
+		threads = [threading.Thread(target=target, name=f"farmer-isolation-{proc.pid}-{name}")
+			for name, target in (("stdout", read_stdout), ("stderr", read_stderr), ("wait", wait_exit))]
+		for thread in threads:
+			thread.start()
+		try:
+			with condition:
+				while not progress["done"]:
+					now = time.monotonic()
+					deadlines = {"no-progress": progress["at"] + no_progress_timeout, "total-cap": began + total_timeout}
+					first = min(deadlines, key=deadlines.get)
+					remaining = deadlines[first] - now
+					if remaining <= 0:
+						bound = first
+						break
+					condition.wait(remaining)
+		finally:
+			# Match subprocess.run's timeout cleanup: kill this child, wait for it,
+			# drain its retained output and join every owned pipe/wait thread.
+			if proc.poll() is None:
+				proc.kill()
+			proc.wait()
+			for thread in threads:
+				thread.join()
+		result = subprocess.CompletedProcess(command, proc.returncode, "".join(stdout), "".join(stderr))
+	last = next((line[len(prefix):] for line in reversed(result.stderr.splitlines()) if line.startswith(prefix)),
+		"unavailable (before the first test or no progress captured)")
+	state = "timed out" if bound else f"exit={result.returncode}"
+	summary = (f"Farmer isolation nested suite {state}: elapsed={time.monotonic() - began:.3f}s, bound={bound or 'none'}, "
+		f"no_progress_bound={no_progress_timeout}s, total_cap={total_timeout}s, last_test={last}")
+	errors = "\n".join(line for line in result.stderr.splitlines() if not line.startswith(prefix))
+	diagnostic = "\n".join((summary, result.stdout, errors))
+	if bound:
+		raise AssertionError(diagnostic)
+	return result, summary, diagnostic
+
+
+class IsolationBoundTests(unittest.TestCase):
+	def setUp(self):
+		self.children = []
+		def spawn(*args, **kwargs):
+			proc = _REAL_POPEN(*args, **kwargs)
+			self.children.append(proc)
+			return proc
+		self.patch = mock.patch.object(subprocess, "Popen", side_effect=spawn)
+		self.patch.start()
+		self.addCleanup(self.patch.stop)
+		self.addCleanup(self.assert_reaped)
+
+	def assert_reaped(self):
+		for proc in self.children:
+			self.assertIsNotNone(proc.returncode)
+			self.assertIsNotNone(proc.poll())
+			if os.name == "nt":
+				wait = ctypes.WinDLL("kernel32", use_last_error=True).WaitForSingleObject
+				wait.argtypes, wait.restype = [wintypes.HANDLE, wintypes.DWORD], wintypes.DWORD
+				self.assertEqual(wait(wintypes.HANDLE(int(proc._handle)), 0), 0, "Owned child still alive")
+			else:
+				with self.assertRaises(ChildProcessError):
+					os.waitpid(proc.pid, os.WNOHANG)
+			self.assertTrue(proc.stdout.closed)
+			self.assertTrue(proc.stderr.closed)
+			self.assertFalse(any(thread.name.startswith(f"farmer-isolation-{proc.pid}-") for thread in threading.enumerate()))
+			print("isolation_bound_fixture " + json.dumps({"test": self.id(), "pid": proc.pid, "reaped": True,
+				"returncode": proc.returncode, "readers_ended": True, "os_exit_proven": True}), flush=True)
+
+	def run_child(self, code, *, no_progress_timeout=1, total_timeout=4):
+		return _run_isolation_child([sys.executable, "-c", code], no_progress_timeout=no_progress_timeout, total_timeout=total_timeout)
+
+	def test_progress_can_outlive_the_old_scaled_total_bound(self):
+		code = """
+import sys,time
+for index in range(6):
+ print('FARMER_ISOLATION_TEST synthetic.test_'+str(index),file=sys.stderr,flush=True)
+ time.sleep(.2)
+print('synthetic success',flush=True)
+"""
+		began = time.monotonic()
+		proc, summary, diagnostic = self.run_child(code)
+		# The former total-only limit is scaled to .4 s in this seconds-long
+		# fixture. Each .2 s heartbeat keeps the independent idle bound alive.
+		self.assertGreater(time.monotonic() - began, .4)
+		self.assertEqual(proc.returncode, 0, diagnostic)
+		self.assertEqual(proc.stdout, "synthetic success\n")
+		self.assertIn("bound=none", summary)
+		self.assertIn("last_test=synthetic.test_5", summary)
+
+	def test_non_progress_output_does_not_prevent_the_no_progress_failure(self):
+		code = """
+import sys,time
+print('synthetic retained stdout',flush=True)
+print('FARMER_ISOLATION_TEST synthetic.stopped',file=sys.stderr,flush=True)
+while True:
+ print('synthetic warning, not test progress',file=sys.stderr,flush=True)
+ time.sleep(.1)
+"""
+		with self.assertRaises(AssertionError) as failure:
+			self.run_child(code)
+		text = str(failure.exception)
+		for expected in ("timed out: elapsed=", "bound=no-progress", "no_progress_bound=1s", "last_test=synthetic.stopped",
+			"synthetic retained stdout", "synthetic warning, not test progress"):
+			self.assertIn(expected, text)
+		self.assertNotIn("FARMER_ISOLATION_TEST ", text)
+
+	def test_continuous_progress_cannot_outlive_the_total_cap(self):
+		code = """
+import sys,time
+print('synthetic retained stdout',flush=True)
+while True:
+ print('FARMER_ISOLATION_TEST synthetic.busy',file=sys.stderr,flush=True)
+ time.sleep(.1)
+"""
+		with self.assertRaisesRegex(AssertionError, "bound=total-cap") as failure:
+			self.run_child(code, total_timeout=1.5)
+		self.assertIn("total_cap=1.5s", str(failure.exception))
+		self.assertIn("last_test=synthetic.busy", str(failure.exception))
+		self.assertIn("synthetic retained stdout", str(failure.exception))
+
+	def test_no_first_progress_line_is_bounded_and_diagnostic(self):
+		with self.assertRaisesRegex(AssertionError, "bound=no-progress") as failure:
+			self.run_child("import time; time.sleep(20)")
+		self.assertIn("last_test=unavailable (before the first test or no progress captured)", str(failure.exception))
+
+	def test_nonzero_exit_keeps_its_output_and_is_not_a_timeout(self):
+		proc, summary, diagnostic = self.run_child("import sys; print('synthetic failure'); print('synthetic stderr',file=sys.stderr); sys.exit(7)")
+		self.assertEqual(proc.returncode, 7)
+		for expected in ("exit=7", "bound=none", "synthetic failure", "synthetic stderr"):
+			self.assertIn(expected, diagnostic)
+
+
 class FarmerIsolationRegression(unittest.TestCase):
 	def test_all_app_tests_refuse_a_real_farmer_spawn(self):
 		code = """
@@ -758,26 +911,14 @@ raise SystemExit(0 if result.wasSuccessful() and not violations else 1)
 		# The guard lives only in this test child, never in the product entrypoint.
 		env = dict(os.environ)
 		env.pop("REWARDS_APP_UI_TESTS", None)
-		# On 2026-10-17 this took 80 s alone and exceeded 120 s under shared
-		# load. Use the parent's 600000 ms overlay command budget, not a speed
-		# assertion; it still bounds a hang within the Windows CI job's 45 min.
-		timeout = 600
-		began = time.monotonic()
-		def diagnostic(state, stdout, stderr):
-			stdout = stdout.decode("utf-8", errors="replace") if isinstance(stdout, bytes) else stdout or ""
-			stderr = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else stderr or ""
-			prefix = "FARMER_ISOLATION_TEST "
-			last = next((line[len(prefix):] for line in reversed(stderr.splitlines()) if line.startswith(prefix)), "unavailable (before the first test or no progress captured)")
-			summary = f"Farmer isolation nested suite {state}: elapsed={time.monotonic() - began:.3f}s, bound={timeout}s, last_test={last}"
-			# Keep actual errors without repeating hundreds of progress markers.
-			errors = "\n".join(line for line in stderr.splitlines() if not line.startswith(prefix))
-			return summary, "\n".join((summary, stdout, errors))
-		try:
-			proc = subprocess.run([sys.executable, "-c", code, str(Path(__file__).parent)], env=env, cwd=Path(__file__).resolve().parents[2],
-				stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
-		except subprocess.TimeoutExpired as exc:
-			self.fail(diagnostic("timed out", exc.stdout, exc.stderr)[1])
-		summary, failure = diagnostic(f"exit={proc.returncode}", proc.stdout, proc.stderr)
+		# On 2026-11-16 the 600 s total cut off a progressing suite under measured
+		# shared load; an idle nested run took 467 s on 2026-11-13. Its last test,
+		# cached/uncached overview equality, took 7.58 s in a focused run today.
+		# Allow 180 s without a test-start line (>23x that sample), not just 25%
+		# total headroom. Keep a 900 s outer cap: the 60 min Windows job needs
+		# 2111 s for UI, leaving 589 s for other unit tests and setup after this cap.
+		proc, summary, failure = _run_isolation_child([sys.executable, "-c", code, str(Path(__file__).parent)],
+			env=env, cwd=Path(__file__).resolve().parents[2])
 		print(summary, flush=True)
 		self.assertEqual(proc.returncode, 0, failure)
 		try:
