@@ -1,6 +1,7 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_household_limit": {"text": "لديك هنا بالفعل {count} حسابات، بما فيها الحسابات الجاري إضافتها. تسمح Microsoft بحساب Rewards واحد لكل شخص وبحد أقصى {limit} حسابات لكل أسرة. تابع فقط إذا فهمت هذه الحدود.", "src": "0b158176"},
     "errors.app.accounts_invite_invalid": {"text": "عملية الدعوة هذه غير صالحة. افتح معاينة جديدة من الحسابات.", "src": "b2620b09"},
     "errors.app.accounts_invite_busy": {"text": "أكمل إعداد الدعوة المعلق أو استأنفه أو تجاهله أولًا.", "src": "c63995e5"},
     "errors.app.accounts_invite_stale": {"text": "تغير المصدر أو الدعوة. راجع معاينة جديدة قبل فتحها.", "src": "44f0cd85"},

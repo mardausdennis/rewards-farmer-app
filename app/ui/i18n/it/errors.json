@@ -1,6 +1,7 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_household_limit": {"text": "Hai già {count} account qui, inclusi quelli che stai aggiungendo. Microsoft consente un account Rewards per persona e fino a {limit} per famiglia. Continua solo se comprendi questi limiti.", "src": "0b158176"},
     "errors.app.accounts_invite_invalid": {"text": "Questa operazione di invito non è valida. Apri una nuova anteprima in Account.", "src": "b2620b09"},
     "errors.app.accounts_invite_busy": {"text": "Prima termina, riprendi o elimina la configurazione con invito in sospeso.", "src": "c63995e5"},
     "errors.app.accounts_invite_stale": {"text": "La fonte o l’invito è cambiato. Controlla una nuova anteprima prima di aprirlo.", "src": "44f0cd85"},

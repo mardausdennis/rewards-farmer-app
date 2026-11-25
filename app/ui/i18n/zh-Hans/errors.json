@@ -1,6 +1,7 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_household_limit": {"text": "这里已有 {count} 个帐户（包括正在添加的帐户）。Microsoft 仅允许每人一个 Rewards 帐户，每个家庭最多 {limit} 个。请在理解这些限制后再继续。", "src": "0b158176"},
     "errors.app.accounts_invite_invalid": {"text": "此邀请操作无效。请在账户页面打开新的预览。", "src": "b2620b09"},
     "errors.app.accounts_invite_busy": {"text": "请先完成、恢复或放弃待处理的邀请设置。", "src": "c63995e5"},
     "errors.app.accounts_invite_stale": {"text": "来源或邀请已更改。打开前请检查新的预览。", "src": "44f0cd85"},

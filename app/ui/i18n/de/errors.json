@@ -1,6 +1,7 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_household_limit": {"text": "Hier sind bereits {count} Konten hinzugefügt oder werden gerade hinzugefügt. Microsoft erlaubt ein Rewards-Konto pro Person und höchstens {limit} pro Haushalt. Fahre nur fort, wenn du diese Grenzen verstehst.", "src": "0b158176"},
     "errors.app.accounts_invite_invalid": {"text": "Dieser Einladungsvorgang ist ungültig. Öffne unter Konten eine neue Vorschau.", "src": "b2620b09"},
     "errors.app.accounts_invite_busy": {"text": "Schließe die offene Einladungseinrichtung ab, setze sie fort oder verwirf sie zuerst.", "src": "c63995e5"},
     "errors.app.accounts_invite_stale": {"text": "Quelle oder Einladung hat sich geändert. Prüfe vor dem Öffnen eine neue Vorschau.", "src": "44f0cd85"},

@@ -1,6 +1,7 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_household_limit": {"text": "Vous avez déjà {count} comptes ici, y compris ceux en cours d’ajout. Microsoft autorise un compte Rewards par personne et jusqu’à {limit} par foyer. Continuez uniquement si vous comprenez ces limites.", "src": "0b158176"},
     "errors.app.accounts_invite_invalid": {"text": "Cette opération d’invitation est invalide. Ouvrez un nouvel aperçu dans Comptes.", "src": "b2620b09"},
     "errors.app.accounts_invite_busy": {"text": "Terminez, reprenez ou abandonnez d’abord la configuration par invitation en attente.", "src": "c63995e5"},
     "errors.app.accounts_invite_stale": {"text": "La source ou l’invitation a changé. Vérifiez un nouvel aperçu avant de l’ouvrir.", "src": "44f0cd85"},

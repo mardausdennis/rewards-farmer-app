@@ -1,6 +1,7 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_household_limit": {"text": "Você já tem {count} contas aqui, incluindo as que estão sendo adicionadas. A Microsoft permite uma conta Rewards por pessoa e até {limit} por família. Continue só se entender esses limites.", "src": "0b158176"},
     "errors.app.accounts_invite_invalid": {"text": "Esta operação de convite não é válida. Abra uma nova prévia em Contas.", "src": "b2620b09"},
     "errors.app.accounts_invite_busy": {"text": "Primeiro conclua, retome ou descarte a configuração por convite pendente.", "src": "c63995e5"},
     "errors.app.accounts_invite_stale": {"text": "A origem ou o convite mudou. Confira uma nova prévia antes de abrir.", "src": "44f0cd85"},

@@ -1,6 +1,7 @@
 {
   "namespace": "errors",
   "messages": {
+    "errors.app.accounts_household_limit": {"text": "ここには追加中を含め、すでに {count} 個のアカウントがあります。Microsoft では、Rewards アカウントは 1 人につき 1 個、1 世帯につき最大 {limit} 個までです。この上限を理解した場合のみ続行してください。", "src": "0b158176"},
     "errors.app.accounts_invite_invalid": {"text": "この招待操作は無効です。アカウント画面で新しいプレビューを開いてください。", "src": "b2620b09"},
     "errors.app.accounts_invite_busy": {"text": "先に保留中の招待設定を完了、再開、または破棄してください。", "src": "c63995e5"},
     "errors.app.accounts_invite_stale": {"text": "招待元または招待が変わりました。開く前に新しいプレビューを確認してください。", "src": "44f0cd85"},
