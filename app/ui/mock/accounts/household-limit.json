@@ -1,0 +1,21 @@
+{
+  "synthetic": true,
+  "note": "Six synthetic local household positions. Acknowledgement is a warning decision, not permission to exceed Microsoft's rules.",
+  "methods": {
+    "list_accounts": {"ok": true, "data": {"accounts": [
+      {"id": "account-1", "label": "Synthetic 1", "dir": "synthetic/account-1", "paused": false, "is_root": false, "signed_in": true, "balance": null, "balance_at": null, "last_run_at": null, "last_result": null, "email": null, "name": null, "picture_rev": null, "invited_by": null, "invited_by_removed": false},
+      {"id": "account-2", "label": "Synthetic 2", "dir": "synthetic/account-2", "paused": false, "is_root": false, "signed_in": true, "balance": null, "balance_at": null, "last_run_at": null, "last_result": null, "email": null, "name": null, "picture_rev": null, "invited_by": "account-1", "invited_by_removed": false},
+      {"id": "account-3", "label": "Synthetic 3", "dir": "synthetic/account-3", "paused": false, "is_root": false, "signed_in": true, "balance": null, "balance_at": null, "last_run_at": null, "last_result": null, "email": null, "name": null, "picture_rev": null, "invited_by": null, "invited_by_removed": false},
+      {"id": "account-4", "label": "Synthetic 4", "dir": "synthetic/account-4", "paused": false, "is_root": false, "signed_in": true, "balance": null, "balance_at": null, "last_run_at": null, "last_result": null, "email": null, "name": null, "picture_rev": null, "invited_by": null, "invited_by_removed": false},
+      {"id": "account-5", "label": "Synthetic 5", "dir": "synthetic/account-5", "paused": true, "is_root": false, "signed_in": null, "balance": null, "balance_at": null, "last_run_at": null, "last_result": null, "email": null, "name": null, "picture_rev": null, "invited_by": null, "invited_by_removed": false},
+      {"id": "account-6", "label": "Synthetic 6", "dir": "synthetic/account-6", "paused": true, "is_root": false, "signed_in": null, "balance": null, "balance_at": null, "last_run_at": null, "last_result": null, "email": null, "name": null, "picture_rev": null, "invited_by": null, "invited_by_removed": false}
+    ]}},
+    "add_account": [
+      {"when": {"household_ack": true}, "ok": true, "data": {"account_id": "account-7", "signin": {"account_id": "account-7", "state": "starting", "error_code": null, "message_key": "accounts.signin.starting", "detail": null, "at": "2026-11-25T16:00:00Z"}}},
+      {"ok": false, "error": {"code": "accounts.household_limit", "message_key": "errors.app.accounts_household_limit", "params": {"count": 6, "limit": 6}, "detail": null, "fields": null}}
+    ],
+    "preview_invite_account": {"ok": false, "error": {"code": "accounts.household_limit", "message_key": "errors.app.accounts_household_limit", "params": {"count": 6, "limit": 6}, "detail": null, "fields": null}},
+    "start_invite_account": {"ok": false, "error": {"code": "accounts.household_limit", "message_key": "errors.app.accounts_household_limit", "params": {"count": 6, "limit": 6}, "detail": null, "fields": null}}
+  },
+  "pushes": []
+}

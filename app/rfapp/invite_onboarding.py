@@ -270,11 +270,15 @@ def _public(op, preview=False):
 	return result
 
 
-def prepare(source_id, choose_target, op_id=None):
+def prepare(source_id, choose_target, op_id=None, *, household_ack=False):
 	with _locked():
 		packet, revision = _source(source_id)
 		value = _load()
 		current = [row for key, op in value["operations"].items() if not (row := _projection(key, op))["recovery_only"]]
+		from rfapp import accounts_admin
+		resuming = _get(value, op_id) if op_id is not None else None
+		accounts_admin._household_guard(household_ack, target=resuming["target_account_id"] if resuming else None,
+			invite_targets=[row["target_account_id"] for row in current if row["phase"] not in _TERMINAL])
 		if any(row["phase"] in _ACTIVE | {"admitting", "awaiting_confirmation"} for row in current): raise InviteError("invite_busy")
 		if op_id is None:
 			if any(row["phase"] in _RESUMABLE for row in current): raise InviteError("invite_busy")
@@ -283,7 +287,7 @@ def prepare(source_id, choose_target, op_id=None):
 			op = {"operation_id": op_id, "target_account_id": target, "home": str(_safe(paths.data_home())), "profile_root": str(_safe(settings.user_data_dir())), "profile_owned": False}
 			if (settings.user_data_dir() / target).exists(): raise InviteError()
 		else:
-			op = _get(value, op_id)
+			op = resuming
 			if op["phase"] not in _RESUMABLE or op["source_account_id"] != source_id: raise InviteError()
 		op.update(source_account_id=source_id, link=packet["link"], link_read_at=packet["link_read_at"], unreadable=packet["unreadable"], source_revision=revision,
 			preview_token=secrets.token_hex(16), continue_token=secrets.token_hex(16), preview_at=_utc(), phase="preview", pid=None, error_code=None, enrollment_token_hash=None)
@@ -292,7 +296,7 @@ def prepare(source_id, choose_target, op_id=None):
 		return _public(op, preview=True)
 
 
-def launch(op_id, preview_token):
+def launch(op_id, preview_token, *, household_ack=False):
 	with _locked():
 		value = _load()
 		op = _get(value, op_id)
@@ -300,6 +304,8 @@ def launch(op_id, preview_token):
 		if not 0 <= (datetime.now(timezone.utc) - _stamp(op["preview_at"])).total_seconds() <= 900: raise InviteError("invite_expired")
 		_, revision = _source(op["source_account_id"])
 		if revision != op["source_revision"]: raise InviteError("invite_stale")
+		from rfapp import accounts_admin
+		accounts_admin._household_guard(household_ack, target=op["target_account_id"], invite_targets=[row["target_account_id"] for key, item in value["operations"].items() if not (row := _projection(key, item))["recovery_only"] and row["phase"] not in _TERMINAL])
 		op.update(phase="launching", pid=0, launched_at=_utc(), continue_token=secrets.token_hex(16))
 		_save(value)
 		return _public(op)

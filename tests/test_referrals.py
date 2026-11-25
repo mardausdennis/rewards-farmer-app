@@ -270,6 +270,7 @@ const result=new Function(payload.script)();
 process.stdout.write(JSON.stringify({result,effects}));
 """
 		for mode, expected in (({}, {"link": LINK}), ({"ambiguous": True}, {"error": "link_ambiguous", "reason": "input_ambiguous"}), ({"missing": True}, {"error": "link_missing", "reason": "input_missing"}), ({"gate": "password"}, {"error": "signed_out"}), ({"gate": "login"}, {"error": "signed_out"}), ({"gate": "challenge"}, {"error": "challenge"}), ({"gate": "unknown"}, {"link": LINK})):
+			if "link" in expected or expected.get("reason") == "input_missing": expected = {**expected, "figures": {}}
 			payload = {"script": referrals._SNAPSHOT, "link": LINK, **mode}
 			env = {key: value for key, value in os.environ.items() if key not in ("NODE_OPTIONS", "NODE_PATH")}
 			result = subprocess.run([node, "-e", wrapper], input=json.dumps(payload), text=True, encoding="utf-8", capture_output=True, timeout=8, env=env)
@@ -308,14 +309,14 @@ class ReferralStoreTests(unittest.TestCase):
 
 	def test_missing_store_is_unknown_and_read_does_not_create_it(self):
 		value = referrals.get_referral_info("one", directory=self.home)
-		self.assertEqual(value, {"link": None, "link_found": False, "referrals": None, "friends": None, "read_at": None, "unreadable": "not_read"})
+		self.assertEqual(value, {"link": None, "link_found": False, "referrals": None, "friends": None, "pending_points": None, "earned_points": None, "referral_status": None, "figures_read_at": None, "figures_state": "unknown", "read_at": None, "unreadable": "not_read"})
 		self.assertEqual(list(self.home.iterdir()), [])
 
 	def test_atomic_roundtrip_bound_to_account_and_matching_event(self):
 		self.save()
 		self.save("two", referrals.ReferralState("https://rewards.bing.com/refer?code=SYNTHETIC_TWO", True))
 		self.event(link_found=True, referrals=None, friends=None, unreadable=None)
-		self.assertEqual(referrals.get_referral_info("one", directory=self.home), {"link": LINK, "link_found": True, "referrals": None, "friends": None, "read_at": AT, "unreadable": None})
+		self.assertEqual(referrals.get_referral_info("one", directory=self.home), {"link": LINK, "link_found": True, "referrals": None, "friends": None, "pending_points": None, "earned_points": None, "referral_status": None, "figures_read_at": None, "figures_state": "unknown", "read_at": AT, "unreadable": None})
 		self.assertNotEqual(referrals.get_referral_info("two", directory=self.home)["link"], LINK)
 		self.assertIsNone(referrals.get_referral_info("other", directory=self.home)["link"])
 		self.assertNotIn(LINK, (self.home / "runs" / (RUN + ".jsonl")).read_text())
@@ -342,7 +343,7 @@ class ReferralStoreTests(unittest.TestCase):
 		replacement = "https://rewards.bing.com/refer?code=SYNTHETIC_NEW"
 		self.save(state=referrals.ReferralState(replacement, True), stamp="2026-10-26T22:00:00Z")
 		value = referrals.get_referral_info("one", directory=self.home)
-		self.assertEqual(value, {"link": replacement, "link_found": True, "referrals": None, "friends": None, "read_at": "2026-10-26T22:00:00Z", "unreadable": None})
+		self.assertEqual(value, {"link": replacement, "link_found": True, "referrals": None, "friends": None, "pending_points": None, "earned_points": None, "referral_status": None, "figures_read_at": None, "figures_state": "unknown", "read_at": "2026-10-26T22:00:00Z", "unreadable": None})
 		stored = json.loads((self.home / "referral.json").read_text())["accounts"]["one"]
 		self.assertEqual(stored["link_read_at"], stored["last_attempt_at"])
 
@@ -466,6 +467,22 @@ class ReferralHookTests(unittest.TestCase):
 			self.assertEqual(main.main(True, plan), 0)
 		self.referral.assert_not_called()
 		self.assertFalse((self.home / "referral.json").exists())
+
+	def test_numeric_figures_survive_the_existing_after_run_storage_hook(self):
+		self.referral.return_value=referrals.ReferralState(LINK,True,referrals=0,friends=2,pending_points=30,earned_points=0,referral_status="pending")
+		self.assertEqual(main.main(True,main.RunPlan(read_state=True)),0)
+		for account in ("one","two"):
+			value=referrals.get_referral_info(account,directory=self.home)
+			self.assertEqual((value["referrals"],value["friends"],value["pending_points"],value["earned_points"]),(0,2,30,0))
+			self.assertEqual(value["figures_state"],"read")
+			self.assertIsInstance(value["figures_read_at"],str)
+		self.assertNotIn(LINK,json.dumps(self.events()))
+
+	def test_even_a_malformed_reader_object_cannot_emit_friend_names(self):
+		self.referral.return_value=referrals.ReferralState(LINK,True,referrals="Synthetic Private",friends=["private@example.invalid"])
+		self.assertEqual(main.main(True,main.RunPlan(read_state=True)),0)
+		for private in ("Synthetic Private","private@example.invalid"):
+			self.assertNotIn(private,json.dumps(self.events())+(self.home/"referral.json").read_text())
 
 	def test_referral_hook_leaves_refer_page_after_read_on_success_or_failure(self):
 		for failure in (False, True):

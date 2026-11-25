@@ -23,6 +23,7 @@ from rfapp.envfile import EnvFile
 
 _logger = logging.getLogger("rfapp")
 _ACTIVE_STATES = ("starting", "waiting", "verifying", "invite_waiting")
+HOUSEHOLD_LIMIT = 6
 _LOCK_NAMES = (".rewards-farmer.lock", ".rewards-farmer.lock.json")
 _LEGACY_KEYS = ("REWARDS_ACCOUNTS", "QUERY_SOURCE", "LLM_PROVIDER", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "OPENROUTER_BASE_URL", "LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY", "LLM_REQUEST_TIMEOUT_SECONDS", "REWARDS_HEADLESS", "USE_VIRTUAL_DESKTOP", "SWITCH_BACK_TO_MAIN_DESKTOP", "SWITCH_BACK_DELAY_SECONDS", "CLEANUP_VIRTUAL_DESKTOP", "EDGE_BINARY", "MSEDGEDRIVER_PATH", "REWARDS_FARMER_LOG_LEVEL")
 _LOCAL_STATE_LIMIT = 4 * 1024 * 1024
@@ -445,6 +446,8 @@ def _list_accounts() -> list[dict]:
 		except identity.IdentityError:
 			bound, identity_status = None, "unknown"
 		result.append({"id": account_id, "label": label, "dir": str(_profile_path(account_id)), "paused": account_id in paused, "is_root": account_id == "@root", **{key: row.get(key) for key in ("signed_in", "balance", "balance_at", "last_run_at", "last_result")}, **_profile_identity(account_id), "picture_rev": picture[2] if picture is not None else None,
+			"invited_by": bound.get("invited_by") if bound else None,
+			"invited_by_removed": bool(bound and bound.get("invited_by") and bound["invited_by"].casefold() not in {account.casefold() for account in [*active, *paused]}),
 			"identity_status": identity_status, "identity_confirmed_at": bound["confirmed_at"] if bound else None,
 			"identity_last_status": row.get("identity_last_status"), "identity_checked_at": row.get("identity_checked_at")})
 	return result
@@ -484,7 +487,47 @@ def _start_signin(account_id: str, new: bool, enroll=False, invitation_id=None) 
 	return {key: starting[key] for key in ("account_id", "state", "error_code", "message_key", "detail", "at")}
 
 
-def preview_invite_account(source_account_id, operation_id=None):
+def _household_guard(household_ack=False, *, target=None, invite_targets=None):
+	# Count local positions once, not people. Root, notes and historical used
+	# ids are excluded. Reauthenticating a configured id needs no new position.
+	if type(household_ack) is not bool:
+		raise _error("bad_request")
+	configured = {account.casefold() for account in [*settings.active_accounts(), *settings.paused_accounts()]} - {"@root"}
+	if target is not None and target.casefold() in configured:
+		return
+	import identity
+	from rfapp import invite_onboarding as invite
+	occupied = set(configured)
+	for account, pending in identity.load(paths.data_home())["pending"].items():
+		if isinstance(pending, dict) and pending.get("new") is True:
+			try:
+				if identity.pending(account, paths.data_home()) is not None: occupied.add(account.casefold())
+			except identity.IdentityError:
+				pass
+	if invite_targets is None:
+		invite_targets = invite.reserved_targets() if (paths.data_home() / "invite-onboarding.json").exists() else []
+	occupied.update(account.casefold() for account in invite_targets)
+	for path in (paths.data_home() / "runs").glob("signin-*.json"):
+		try:
+			status = json.loads(read_file(path))
+			account = status["account_id"]
+			_profile_path(account)
+			age = (datetime.now(timezone.utc) - datetime.fromisoformat(status["at"].replace("Z", "+00:00"))).total_seconds()
+			# Read only this status here: invite status projection takes the store
+			# lock that prepare/launch already owns. No nested lock acquisition.
+			if status.get("state") in _ACTIVE_STATES and 0 <= age <= 900 and ((status["state"] == "starting" and age < 30) or _pid_alive(status.get("pid"))):
+				occupied.add(account.casefold())
+		except (KeyError, TypeError, ValueError, AttributeError, OSError):
+			continue
+	occupied.discard("@root")
+	# A preview or started target is already counted; do not count it twice
+	# when launch/confirmation checks the current positions again.
+	count = len(occupied - {target.casefold() if target is not None else None})
+	if count >= HOUSEHOLD_LIMIT and not household_ack:
+		raise _error("accounts.household_limit", params={"count": count, "limit": HOUSEHOLD_LIMIT})
+
+
+def preview_invite_account(source_account_id, operation_id=None, household_ack=False):
 	from rfapp import invite_onboarding as invite
 	_known_account(source_account_id)
 	_ensure_idle()
@@ -498,13 +541,13 @@ def preview_invite_account(source_account_id, operation_id=None):
 			candidate = f"account-{number}"
 			if candidate not in used: return candidate
 		raise invite.InviteError()
-	return {"invitation": invite.prepare(source_account_id, choose, operation_id)}
+	return {"invitation": invite.prepare(source_account_id, choose, operation_id, household_ack=household_ack)}
 
 
-def start_invite_account(operation_id, preview_token):
+def start_invite_account(operation_id, preview_token, household_ack=False):
 	from rfapp import invite_onboarding as invite
 	_ensure_idle()
-	operation = invite.launch(operation_id, preview_token)
+	operation = invite.launch(operation_id, preview_token, household_ack=household_ack)
 	try:
 		status = _start_signin(operation["target_account_id"], True, enroll=True, invitation_id=operation_id)
 		if status["state"] == "failed": invite.interrupt(operation_id)
@@ -531,8 +574,9 @@ def discard_invite_account(operation_id):
 	return {"invitation": invite.discard(operation_id, _recycle, _pid_alive)}
 
 
-def _add_account(confirm_migration=False) -> dict:
+def _add_account(confirm_migration=False, household_ack=False) -> dict:
 	import identity
+	_household_guard(household_ack)
 	journal_path = paths.data_home() / "account-migration.json"
 	if journal_path.exists():
 		_ensure_idle()
@@ -716,8 +760,9 @@ def _sign_in_again(account_id: str) -> dict:
 	return _start_signin(account_id, False)
 
 
-def begin_enrollment(account_id):
+def begin_enrollment(account_id, household_ack=False):
 	_known_account(account_id)
+	_household_guard(household_ack, target=account_id)
 	_ensure_idle()
 	return {"signin": _start_signin(account_id, False, enroll=True)}
 
@@ -732,7 +777,7 @@ def get_enrollment_status(account_id):
 	return {"account_id": account_id, "state": "awaiting_confirmation", "observed_name": pending["observed_name"], "confirmation_token": pending["token"], "observed_at": pending["observed_at"], "same_name_limit": True}
 
 
-def confirm_enrollment(account_id, confirmation_token, confirmed):
+def confirm_enrollment(account_id, confirmation_token, confirmed, household_ack=False):
 	import identity
 	_ensure_idle()
 	_profile_path(account_id)
@@ -741,6 +786,7 @@ def confirm_enrollment(account_id, confirmation_token, confirmed):
 	pending = identity.pending(account_id, paths.data_home())
 	if pending is None or not secrets.compare_digest(pending["token"], confirmation_token):
 		raise _error("accounts.enrollment_required")
+	_household_guard(household_ack, target=account_id)
 	from rfapp import invite_onboarding as invite
 	invite_op = None
 	before = identity.load(paths.data_home())
@@ -783,6 +829,8 @@ def confirm_enrollment(account_id, confirmation_token, confirmed):
 			# after replacing the file, so rollback cannot strand that phase.
 			invite_op = invitation["operation_id"]
 			invite.admit(account_id, confirmation_token)
+			# Local admission provenance is not Microsoft's referral confirmation.
+			value["bindings"][account_id] = {**value["bindings"][account_id], "invited_by": invitation["source_account_id"]}
 		identity.save(value, paths.data_home())
 		if value["mode"] == "managed": prefs.save({"identity_managed": True})
 		if pending["new"]:
@@ -893,8 +941,8 @@ def import_legacy_install() -> dict:
 	return {"accounts": _import_legacy_install()}
 
 
-def add_account(confirm_migration=False) -> dict:
-	return _add_account(confirm_migration)
+def add_account(confirm_migration=False, household_ack=False) -> dict:
+	return _add_account(confirm_migration, household_ack)
 
 
 def sign_in_again(account_id) -> dict:

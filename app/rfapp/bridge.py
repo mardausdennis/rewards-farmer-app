@@ -599,33 +599,36 @@ class Bridge:
 		account_id = self._known_account(request["account_id"])
 		return self._module("accounts_admin").get_account_picture(account_id)
 
-	@_method(optional=("confirm_migration",))
+	@_method(optional=("confirm_migration", "household_ack"))
 	def add_account(self, request):
 		confirmed = _boolean(request.get("confirm_migration", False))
 		with self._settings_lock:
-			return self._module("accounts_admin").add_account(confirm_migration=confirmed)
+			return self._module("accounts_admin").add_account(confirm_migration=confirmed, **({"household_ack": _boolean(request["household_ack"])} if "household_ack" in request else {}))
 
-	def _invite_call(self, name, *args):
+	def _invite_call(self, name, *args, **kwargs):
 		try:
-			return getattr(self._module("accounts_admin"), name)(*args)
+			return getattr(self._module("accounts_admin"), name)(*args, **kwargs)
 		except Exception as exc:
 			# Invitation store/transport errors must not leak their private URL
 			# through generic exception messages or the bridge exception logger.
 			code = getattr(exc, "code", None)
+			if code == "accounts.household_limit":
+				params = getattr(exc, "params", {})
+				raise _BridgeError(code, params={"count": params.get("count"), "limit": 6}) from None
 			allowed = {"accounts.invite_" + item for item in ("invalid", "busy", "stale", "link_unavailable", "root", "expired", "token", "interrupted", "ineligible", "unknown", "storage", "registered")}
 			if code in allowed or code in ("run.busy", "accounts.signin_active", "accounts.unknown"):
 				raise _BridgeError(code) from None
 			raise _BridgeError("accounts.invite_storage") from None
 
-	@_method(required=("source_account_id",), optional=("operation_id",))
+	@_method(required=("source_account_id",), optional=("operation_id", "household_ack"))
 	def preview_invite_account(self, request):
 		with self._settings_lock:
-			return self._invite_call("preview_invite_account", self._known_account(request["source_account_id"]), request.get("operation_id"))
+			return self._invite_call("preview_invite_account", self._known_account(request["source_account_id"]), request.get("operation_id"), **({"household_ack": _boolean(request["household_ack"])} if "household_ack" in request else {}))
 
-	@_method(required=("operation_id", "preview_token"))
+	@_method(required=("operation_id", "preview_token"), optional=("household_ack",))
 	def start_invite_account(self, request):
 		with self._settings_lock:
-			return self._invite_call("start_invite_account", _string(request["operation_id"]), _string(request["preview_token"]))
+			return self._invite_call("start_invite_account", _string(request["operation_id"]), _string(request["preview_token"]), **({"household_ack": _boolean(request["household_ack"])} if "household_ack" in request else {}))
 
 	@_method()
 	def list_invite_operations(self, request):
@@ -651,19 +654,19 @@ class Bridge:
 	def get_signin_status(self, request):
 		return self._module("accounts_admin").get_signin_status(_account(request["account_id"]))
 
-	@_method(required=("account_id",))
+	@_method(required=("account_id",), optional=("household_ack",))
 	def begin_enrollment(self, request):
 		with self._settings_lock:
-			return self._module("accounts_admin").begin_enrollment(self._known_account(request["account_id"]))
+			return self._module("accounts_admin").begin_enrollment(self._known_account(request["account_id"]), **({"household_ack": _boolean(request["household_ack"])} if "household_ack" in request else {}))
 
 	@_method(required=("account_id",))
 	def get_enrollment_status(self, request):
 		return self._module("accounts_admin").get_enrollment_status(_account(request["account_id"]))
 
-	@_method(required=("account_id", "confirmation_token", "confirmed"))
+	@_method(required=("account_id", "confirmation_token", "confirmed"), optional=("household_ack",))
 	def confirm_enrollment(self, request):
 		with self._settings_lock:
-			result = self._module("accounts_admin").confirm_enrollment(_account(request["account_id"]), _string(request["confirmation_token"]), _boolean(request["confirmed"]))
+			result = self._module("accounts_admin").confirm_enrollment(_account(request["account_id"]), _string(request["confirmation_token"]), _boolean(request["confirmed"]), **({"household_ack": _boolean(request["household_ack"])} if "household_ack" in request else {}))
 		self._context_changed()
 		self._push("overview.changed", {})
 		return result

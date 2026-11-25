@@ -97,7 +97,7 @@ class InvitationTests(unittest.TestCase):
 		self.assertEqual(paths.prefs_path().read_bytes(), before)
 
 	def test_referral_bridge_account_binding_default_explicit_and_unknown(self):
-		backend = SimpleNamespace(get_referral_info=Mock(return_value={"link": None, "link_found": False, "referrals": None, "friends": None, "read_at": None, "unreadable": "not_read"}))
+		backend = SimpleNamespace(get_referral_info=Mock(return_value={"link": None, "link_found": False, "referrals": None, "friends": None, "pending_points": None, "earned_points": None, "referral_status": None, "figures_read_at": None, "figures_state": "unknown", "read_at": None, "unreadable": "not_read"}))
 		self.api._dependencies["referrals"] = backend
 		self.admin.list_accounts.return_value = {"accounts": [{"id": "account-2", "paused": True}, {"id": "account-1", "paused": False}]}
 		self.assertTrue(self.api.get_referral_info({})["ok"])
@@ -114,7 +114,7 @@ class InvitationTests(unittest.TestCase):
 		referrals.save_referral_state("account-1", referrals.ReferralState("https://rewards.bing.com/refer?code=SYNTHETIC", True), read_at="2026-10-26T12:00:00Z", run_id="synthetic-good", directory=self.home)
 		referrals.save_referral_state("account-1", referrals.ReferralState(unreadable="page_unknown", reason="no_copy_button"), read_at="2026-10-28T08:54:41Z", run_id="synthetic-failed", directory=self.home)
 		answer = self.api.get_referral_info({})
-		self.assertEqual(answer, {"ok": True, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC", "link_found": True, "referrals": None, "friends": None, "read_at": "2026-10-26T12:00:00Z", "unreadable": "page_unknown"}})
+		self.assertEqual(answer, {"ok": True, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC", "link_found": True, "referrals": None, "friends": None, "pending_points": None, "earned_points": None, "referral_status": None, "figures_read_at": None, "figures_state": "unknown", "read_at": "2026-10-26T12:00:00Z", "unreadable": "page_unknown"}})
 
 	def test_friends_are_not_real_accounts_and_cannot_start_run(self):
 		friend = self.save()["data"]["friend"]

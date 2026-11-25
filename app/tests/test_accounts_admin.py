@@ -74,6 +74,7 @@ class AccountsAdminTests(unittest.TestCase):
 		rows = admin._list_accounts()
 		self.assertEqual(len(rows), 1)
 		self.assertEqual(rows[0], {"id": "@root", "label": "Account 1", "dir": str(self.profiles), "paused": False, "is_root": True, "signed_in": None, "balance": None, "balance_at": None, "last_run_at": None, "last_result": None, "email": None, "name": None, "picture_rev": None,
+			"invited_by": None, "invited_by_removed": False,
 			"identity_status": "unconfirmed", "identity_confirmed_at": None, "identity_last_status": None, "identity_checked_at": None})
 
 	def local_state(self, account_id, info):

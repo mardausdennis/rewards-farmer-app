@@ -5,8 +5,9 @@
     "save_invited_friend": {"ok": true, "data": {"friend": {"id": "friend-00000000000000000000000000000001", "name": "Synthetic Friend", "email": "friend@example.invalid", "added_at": "2026-10-25T22:00:00Z"}}},
     "remove_invited_friend": {"ok": true, "data": {"invited_friends": []}},
     "get_referral_info": [
-      {"when": {"account_id": "account-1"}, "ok": true, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC", "link_found": true, "referrals": null, "friends": null, "read_at": "2026-10-25T22:00:00Z", "unreadable": "page_unknown"}},
-      {"ok": true, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC", "link_found": true, "referrals": null, "friends": null, "read_at": "2026-10-25T22:00:00Z", "unreadable": null}}
+      {"when": {"account_id": "account-1"}, "ok": true, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC", "link_found": true, "referrals": null, "friends": null, "pending_points": null, "earned_points": null, "referral_status": null, "figures_read_at": null, "figures_state": "unknown", "read_at": "2026-10-25T22:00:00Z", "unreadable": "page_unknown"}},
+      {"when": {"account_id": "account-2"}, "ok": true, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC_2", "link_found": true, "referrals": 1, "friends": 1, "pending_points": 0, "earned_points": 100, "referral_status": "completed", "figures_read_at": "2026-10-24T22:00:00Z", "figures_state": "stale", "read_at": "2026-10-25T22:00:00Z", "unreadable": "page_unknown"}},
+      {"ok": true, "data": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC", "link_found": true, "referrals": 2, "friends": 2, "pending_points": 100, "earned_points": 0, "referral_status": "pending", "figures_read_at": "2026-10-25T22:00:00Z", "figures_state": "read", "read_at": "2026-10-25T22:00:00Z", "unreadable": null}}
     ]
   },
   "pushes": []

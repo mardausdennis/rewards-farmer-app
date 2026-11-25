@@ -193,6 +193,9 @@ def binding(account_id, directory=None):
 	except (KeyError, ValueError, TypeError, AttributeError):
 		valid = False
 	if not valid: raise IdentityError()
+	source = value.get("invited_by")
+	if source is not None and (not isinstance(source, str) or not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", source) or source.casefold() == account_id.casefold()):
+		raise IdentityError()
 	return dict(value)
 
 

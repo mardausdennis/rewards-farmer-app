@@ -120,7 +120,8 @@ def _record_referrals(driver, account):
 		state = dataclasses.replace(state, unreadable="storage_failed")
 	# The correlated run event deliberately never carries the link or exception text.
 	run_record.emit("referral_state", account=account.name, account_id=account_id, read_at=read_at, link_found=state.link_found,
-		referrals=state.referrals, friends=None if state.friends is None else len(state.friends), unreadable=state.unreadable,
+		referrals=referrals._figures({"referrals":state.referrals}).get("referrals"),
+		friends=referrals._figures({"friends":state.friends}).get("friends"), unreadable=state.unreadable,
 		reason=state.reason if isinstance(state.reason, str) and state.reason in referrals.REASON_CODES else None)
 
 

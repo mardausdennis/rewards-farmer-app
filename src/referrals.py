@@ -1,6 +1,6 @@
 """Read-only referral observation and private, account-bound local snapshots."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
@@ -17,7 +17,8 @@ import run_record
 
 
 TARGET = "https://rewards.bing.com/referandearn/"
-# F102 observed the page skeleton, not this relationship or the link value.
+# F102 observed the skeleton, not the link relationship or figure selectors.
+# Phase-B live-page confirmation is still required for both observations.
 SELECTORS_VERIFIED = False
 UNREADABLE_CODES = frozenset(("signed_out", "challenge", "page_unknown", "link_missing", "link_ambiguous", "link_invalid", "read_failed", "storage_failed", "storage_unreadable", "not_read"))
 REASON_CODES = frozenset(("location", "too_many_controls", "no_main", "not_complete", "no_copy_button", "copy_button_ambiguous", "input_ambiguous", "input_missing", "link_invalid", "invalid_snapshot", "read_failed"))
@@ -30,9 +31,12 @@ class ReferralState:
 	link: str | None = field(default=None, repr=False)
 	link_found: bool = False
 	referrals: int | None = None
-	friends: list | None = None
+	friends: int | None = None
 	unreadable: str | None = None
 	reason: str | None = None
+	pending_points: int | None = None
+	earned_points: int | None = None
+	referral_status: str | None = None
 
 
 def _allowed_page(value):
@@ -83,18 +87,76 @@ const buttons = [...root.querySelectorAll('button,[role="button"]')].filter(n =>
 if (buttons.length !== 1) return {error:buttons.length ? 'link_ambiguous' : 'page_unknown',reason:buttons.length ? 'copy_button_ambiguous' : 'no_copy_button'};
 """
 _READY = _PAGE_CHECK + "return {ready:true};"
-_SNAPSHOT = _PAGE_CHECK + r"""
+_FIGURES = r"""
+// Only exact label/value relationships are observations. Never return a
+// person's row, count DOM entries or infer a zero from an empty section.
+function referralFigures() {
+  const output={}, seen={};
+  const labels={referrals:['your referrals','referrals','referrals joined','total referrals'],friends:['your friends','friends','friends joined','friends who joined'],pending_points:['pending points','points pending','pending referral points'],earned_points:['earned points','points earned','earned referral points','referral points earned'],referral_status:['status','referral status']};
+  const aliases=Object.entries(labels).flatMap(([code,words])=>words.map(word=>({code,word})));
+  const visible=n=>!n.hidden && n.getAttribute('aria-hidden')!=='true' && (!n.closest || !n.closest('[aria-hidden="true"],[hidden]')) && (!n.getClientRects || n.getClientRects().length>0);
+  const nodes=[...root.querySelectorAll('h2,h3,p,span,div,dt,dd,[aria-label]')];
+  if(nodes.length>1600) return {};
+  const headings=[...root.querySelectorAll('h2,h3,[role="heading"]')];
+  const sectionNames=['your referrals','your friends'];
+  const inArea=n=>headings.some(h=>{
+    if(!visible(h)||!sectionNames.includes(norm(h.textContent))) return false;
+    // A section/article with exactly one heading cannot silently widen past
+    // a later unrelated section that happens to share the same container.
+    const parent=h.parentElement;
+    if(parent && ['SECTION','ARTICLE'].includes(parent.tagName) && parent.querySelectorAll('h1,h2,h3,[role="heading"]').length===1 && parent.contains(n)) return true;
+    for(let next=h.nextElementSibling;next;next=next.nextElementSibling){
+      if(/^H[12]$/.test(next.tagName)||next.getAttribute('role')==='heading') break;
+      if(next===n || next.contains(n)) return true;
+    }
+    return false;
+  });
+  const numeric=text=>{
+    if(!/^(?:0|[1-9][0-9]*|[1-9][0-9]{0,2}(?:,[0-9]{3})+)$/.test(text)) return null;
+    const value=Number(text.replace(/,/g,''));
+    return Number.isSafeInteger(value)&&value<=2147483647?value:null;
+  };
+  function capture(code,text){
+    const value=code==='referral_status'?({pending:'pending',completed:'completed',mixed:'mixed'}[norm(text)]??null):numeric(text.trim());
+    if(value===null) return;
+    (seen[code]??=new Set()).add(value);
+  }
+  for(const node of nodes){
+    if(!visible(node)) continue;
+    // textContent never leaves this execution and is not a diagnostic field.
+    const aria=node.getAttribute('aria-label');
+    const text=String(aria||node.textContent||'').replace(/\s+/g,' ').trim();
+    if(text.length>128) continue;
+    for(const {code,word} of aliases){
+      const normalized=norm(text);
+      const explicit=word.includes('referral')||word.includes('joined');
+      if(!inArea(node)&&!(aria&&explicit)) continue;
+      if(normalized===word){
+        const next=node.nextElementSibling;
+        if(next&&visible(next)&&!/^H[1-6]$/.test(next.tagName)) capture(code,String(next.textContent||'').replace(/\s+/g,' ').trim());
+      }else{
+        const match=normalized.match(new RegExp('^'+word+'\\s*:?\\s+(.+)$'));
+        if(match) capture(code,match[1]);
+      }
+    }
+  }
+  for(const [code,values] of Object.entries(seen)) if(values.size===1) output[code]=[...values][0];
+  return output;
+}
+const figures=referralFigures();
+"""
+_SNAPSHOT = _PAGE_CHECK + _FIGURES + r"""
 const [copy] = buttons;
 let parent = copy.parentElement;
 for (let depth=0; parent && depth<6 && root.contains(parent); depth++, parent=parent.parentElement) {
   const inputs = parent.querySelectorAll('input[type="text"],input[type="url"],input:not([type])');
   if (inputs.length > 1) return {error:'link_ambiguous',reason:'input_ambiguous'};
   if (inputs.length === 1) {
-    for (const input of inputs) return {link:String(input.value || '').trim()};
+    for (const input of inputs) return {link:String(input.value || '').trim(),figures};
   }
   if (parent === root) break;
 }
-return {error:'link_missing',reason:'input_missing'};
+return {error:'link_missing',reason:'input_missing',figures};
 """
 
 
@@ -113,7 +175,7 @@ def _private_transport():
 
 
 def read_referral_page(driver) -> ReferralState:
-	"""One navigation, no clicks; figures and friends have no verified selectors."""
+	"""One navigation, no clicks; figures require explicit labels, not row counts."""
 	with _private_transport():
 		return _read_page(driver)
 
@@ -193,12 +255,14 @@ def _read_page(driver):
 		if not isinstance(raw, dict):
 			return _page_failure(raw)
 		if raw.get("error"):
-			return _page_failure(raw)
+			state = _page_failure(raw)
+			return replace(state, **_figures(raw.get("figures"))) if state.unreadable == "link_missing" else state
 		value = raw.get("link")
 		link = _link(value)
 		if link is None:
-			return ReferralState(unreadable="link_missing" if not value else "link_invalid", reason="input_missing" if not value else "link_invalid")
-		return ReferralState(link=link, link_found=True)
+			return ReferralState(unreadable="link_missing" if not value else "link_invalid", reason="input_missing" if not value else "link_invalid",
+				**(_figures(raw.get("figures")) if not value else {}))
+		return ReferralState(link=link, link_found=True, **_figures(raw.get("figures")))
 	except Exception:
 		# WebDriver messages can contain the full private URL or returned markup.
 		return ReferralState(unreadable="read_failed", reason="read_failed")
@@ -225,9 +289,14 @@ def save_referral_state(account, state, *, read_at, run_id, directory=None):
 		raise ValueError("storage_unreadable")
 	link = _link(state.link) if state.link_found is True and state.unreadable is None else None
 	unreadable = _unreadable(state.unreadable) if state.unreadable is not None else None if link else "link_invalid" if state.link else "link_missing"
+	observed = _figures({key: getattr(state, key, None) for key in FIGURE_FIELDS}) if state.unreadable in (None, "link_missing") else {}
+	good_figures = bool(observed)
+	retained = _figures(previous) if _time(previous.get("figures_read_at")) is not None else {}
 	value["accounts"][account] = {"link": link or previous.get("link"), "link_found": bool(link or previous.get("link")),
 		"link_read_at": read_at if link else previous.get("link_read_at"), "last_attempt_at": read_at,
-		"referrals": state.referrals, "friends": state.friends, "unreadable": unreadable, "run_id": run_id}
+		**{key: (observed if good_figures else retained).get(key) for key in FIGURE_FIELDS},
+		"figures_read_at": read_at if good_figures else previous.get("figures_read_at") if retained else None,
+		"figures_state": "read" if good_figures else "stale" if retained else "unknown", "unreadable": unreadable, "run_id": run_id}
 	path = _home(directory) / "referral.json"
 	path.parent.mkdir(parents=True, exist_ok=True)
 	name = None
@@ -256,6 +325,17 @@ def _unreadable(value):
 	return value if isinstance(value, str) and value in UNREADABLE_CODES else "storage_unreadable" if value is not None else None
 
 
+FIGURE_FIELDS = ("referrals", "friends", "pending_points", "earned_points", "referral_status")
+
+
+def _figures(raw):
+	if not isinstance(raw, dict): return {}
+	result = {key: raw[key] for key in FIGURE_FIELDS[:-1] if type(raw.get(key)) is int and 0 <= raw[key] <= 2147483647}
+	if isinstance(raw.get("referral_status"), str) and raw["referral_status"] in ("pending", "completed", "mixed"):
+		result["referral_status"] = raw["referral_status"]
+	return result
+
+
 def _snapshot(value):
 	if value is None:
 		return {}
@@ -271,7 +351,8 @@ def _snapshot(value):
 
 
 def get_referral_info(account, *, directory=None):
-	result = {"link": None, "link_found": False, "referrals": None, "friends": None, "read_at": None, "unreadable": "not_read"}
+	result = {"link": None, "link_found": False, **{key: None for key in FIGURE_FIELDS},
+		"figures_read_at": None, "figures_state": "unknown", "read_at": None, "unreadable": "not_read"}
 	if account is None:
 		return result
 	try:
@@ -298,10 +379,12 @@ def get_referral_info(account, *, directory=None):
 	# The link is an independently dated good observation, not a field of the
 	# latest event. A later failed attempt must not invalidate that observation.
 	result.update(link=stored.get("link"), link_found=bool(stored.get("link")),
-		referrals=data.get("referrals") if type(data.get("referrals")) is int and data["referrals"] >= 0 else None,
 		read_at=stored.get("link_read_at") if stored.get("link") else data.get("last_attempt_at"), unreadable=_unreadable(data.get("unreadable")))
-	if matched and stored and result["unreadable"] is None:
-		result["friends"] = stored.get("friends") if isinstance(stored.get("friends"), list) else None
+	figures = _figures(stored)
+	figure_time = _time(stored.get("figures_read_at"))
+	if figures and figure_time is not None and figure_time <= _time(stored["last_attempt_at"]):
+		fresh = stored.get("figures_state") == "read" and figure_time == _time(stored["last_attempt_at"]) and matched
+		result.update(figures, figures_read_at=stored["figures_read_at"], figures_state="read" if fresh else "stale")
 	if data.get("link_found") is True and (not matched or result["link"] is None) and result["unreadable"] is None:
 		result["unreadable"] = "storage_unreadable"
 	return result

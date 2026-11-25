@@ -42,7 +42,7 @@ SUCCESS_KEYS = {
 	"get_invited_friends": {"invited_friends"},
 	"save_invited_friend": {"friend"},
 	"remove_invited_friend": {"invited_friends"},
-	"get_referral_info": {"link", "link_found", "referrals", "friends", "read_at", "unreadable"},
+"get_referral_info": {"link", "link_found", "referrals", "friends", "pending_points", "earned_points", "referral_status", "figures_read_at", "figures_state", "read_at", "unreadable"},
 	"begin_enrollment": {"signin"},
 	"get_enrollment_status": {"account_id", "state", "observed_name", "confirmation_token", "observed_at", "same_name_limit"},
 	"confirm_enrollment": {"account_id", "identity_status", "confirmed_at", "managed", "same_name_limit"},
@@ -65,7 +65,7 @@ STATS_TOTALS = {"week_earned", "month_earned", "earned", "measured_earned", "kno
 STATS_STREAK = {"current", "through", "today_done", "best", "best_from", "best_to", "missed", "not_checked"}
 STATS_SOURCE_IDS = {"daily_set", "explore_on_bing", "visual_search", "misc_cards", "quests", "searches", "bonus"}
 STATS_STATES = {"done", "missed", "no_check", "today_open", "before_tracking"}
-ACCOUNT_KEYS = {"id", "label", "dir", "paused", "is_root", "signed_in", "balance", "balance_at", "last_run_at", "last_result", "email", "name", "picture_rev"}
+ACCOUNT_KEYS = {"id", "label", "dir", "paused", "is_root", "signed_in", "balance", "balance_at", "last_run_at", "last_result", "email", "name", "picture_rev", "invited_by", "invited_by_removed"}
 
 
 def overview_streaks_problems(value):
@@ -383,9 +383,11 @@ def validate_account_and_signin_records(mock_root):
 					if record["message_key"] != produced["message_key"]:
 						problems.append(f"{location}.message_key: {record['message_key']!r} differs from signin._write_status {produced['message_key']!r}")
 				else:
-					for key in ("email", "name", "picture_rev"):
+					for key in ("email", "name", "picture_rev", "invited_by"):
 						if key not in record or record[key] is not None and not isinstance(record[key], str):
 							problems.append(f"{location}.{key}: Account requires string or null")
+					if type(record.get("invited_by_removed")) is not bool:
+						problems.append(f"{location}.invited_by_removed: expected boolean")
 	return problems
 
 
@@ -512,8 +514,14 @@ class MockShapeTests(unittest.TestCase):
 					for _, answer in successful_answers(methods["get_referral_info"]):
 						data = answer["data"]
 						self.assertEqual(set(data), set(info))
-						self.assertIsNone(data["referrals"])
-						self.assertIsNone(data["friends"])
+						for key in ("referrals", "friends", "pending_points", "earned_points"):
+							self.assertTrue(data[key] is None or type(data[key]) is int and data[key] >= 0)
+						self.assertIn(data["figures_state"], ("read", "unknown", "stale"))
+						self.assertIn(data["referral_status"], (None, "pending", "completed", "mixed"))
+						if data["figures_state"] == "unknown":
+							self.assertTrue(all(data[key] is None for key in ("referrals", "friends", "pending_points", "earned_points", "referral_status", "figures_read_at")))
+						else:
+							self.assertIsInstance(data["figures_read_at"], str)
 						self.assertIs(type(data["link_found"]), bool)
 
 	def test_f111_retained_link_fixture_matches_backend_after_failed_attempt(self):
@@ -524,6 +532,14 @@ class MockShapeTests(unittest.TestCase):
 			referrals.save_referral_state("account-1", referrals.ReferralState(retained["link"], True), read_at=retained["read_at"], run_id="synthetic-good", directory=directory)
 			referrals.save_referral_state("account-1", referrals.ReferralState(unreadable="page_unknown", reason="no_copy_button"), read_at="2026-10-28T08:54:41Z", run_id="synthetic-failed", directory=directory)
 			self.assertEqual(referrals.get_referral_info("account-1", directory=directory), retained)
+
+	def test_household_warning_fixture_matches_real_bridge_error_and_frozen_params(self):
+		from rfapp import bridge, accounts_admin
+		answers=json.loads((MOCK_ROOT/"accounts/household-limit.json").read_text(encoding="utf-8"))["methods"]["add_account"]
+		fixture=next(answer for answer in answers if not answer["ok"])
+		with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{"REWARDS_FARMER_DATA_HOME":directory}):
+			with patch.object(accounts_admin,"add_account",side_effect=accounts_admin._error("accounts.household_limit",params={"count":6,"limit":6})):
+				self.assertEqual(bridge.Bridge().add_account({}),fixture)
 
 	def test_f78_overview_streaks_shapes(self):
 		checked = 0
@@ -752,13 +768,15 @@ class MockShapeTests(unittest.TestCase):
 			path = root / "fixture.json"
 			path.write_text(json.dumps({"signin": status, "account": account}), encoding="utf-8")
 			problems = validate_account_and_signin_records(root)
-			self.assertEqual(3, len(problems), problems)
+			self.assertEqual(5, len(problems), problems)
 			self.assertTrue(any("signin._write_status" in problem for problem in problems))
 			self.assertTrue(any(".account.email" in problem for problem in problems))
 			self.assertTrue(any(".account.name" in problem for problem in problems))
+			self.assertTrue(any(".account.invited_by:" in problem for problem in problems))
+			self.assertTrue(any(".account.invited_by_removed:" in problem for problem in problems))
 			with patch.object(signin.paths, "runs_dir", return_value=root):
 				status = signin._write_status("synthetic", "waiting")
-			account.update(email=None, name=None)
+			account.update(email=None, name=None, invited_by=None, invited_by_removed=False)
 			path.write_text(json.dumps({"signin": status, "account": account}), encoding="utf-8")
 			self.assertEqual([], validate_account_and_signin_records(root))
 
