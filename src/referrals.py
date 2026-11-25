@@ -17,9 +17,14 @@ import run_record
 
 
 TARGET = "https://rewards.bing.com/referandearn/"
-# F102 observed the skeleton, not the link relationship or figure selectors.
-# Phase-B live-page confirmation is still required for both observations.
+# Aggregate remains false: observing one page cannot verify every field,
+# language, nonzero value or populated friends list.
 SELECTORS_VERIFIED = False
+# Live proof on 2026-11-25 covers only the exact English P-label/P-number
+# summary variant on one account's page. Other aliases remain synthetic-only;
+# friends, status, populated rows and other page languages were not observed.
+FIGURE_SELECTORS_VERIFIED = {"referrals": True, "friends": False, "pending_points": True,
+	"earned_points": True, "referral_status": False}
 UNREADABLE_CODES = frozenset(("signed_out", "challenge", "page_unknown", "link_missing", "link_ambiguous", "link_invalid", "read_failed", "storage_failed", "storage_unreadable", "not_read"))
 REASON_CODES = frozenset(("location", "too_many_controls", "no_main", "not_complete", "no_copy_button", "copy_button_ambiguous", "input_ambiguous", "input_missing", "link_invalid", "invalid_snapshot", "read_failed"))
 READY_TIMEOUT = 15.0
@@ -99,6 +104,7 @@ function referralFigures() {
   if(nodes.length>1600) return {};
   const headings=[...root.querySelectorAll('h2,h3,[role="heading"]')];
   const sectionNames=['your referrals','your friends'];
+  const referralSummary=sectionNames.every(label=>headings.some(h=>visible(h)&&norm(h.textContent)===label));
   const inArea=n=>headings.some(h=>{
     if(!visible(h)||!sectionNames.includes(norm(h.textContent))) return false;
     // A section/article with exactly one heading cannot silently widen past
@@ -127,6 +133,15 @@ function referralFigures() {
     const aria=node.getAttribute('aria-label');
     const text=String(aria||node.textContent||'').replace(/\s+/g,' ').trim();
     if(text.length>128) continue;
+    // Phase B observed exact P label -> P number pairs on the recognized
+    // English referral page, outside the friends list itself. This is not a
+    // generic points scraper: require both page headings and exact labels.
+    const summaryCode=({referrals:'referrals','earned points':'earned_points','pending points':'pending_points'})[norm(text)];
+    if(referralSummary&&summaryCode&&node.tagName==='P'){
+      const next=node.nextElementSibling;
+      if(next&&next.tagName==='P'&&visible(next)) capture(summaryCode,String(next.textContent||'').replace(/\s+/g,' ').trim());
+      continue;
+    }
     for(const {code,word} of aliases){
       const normalized=norm(text);
       const explicit=word.includes('referral')||word.includes('joined');

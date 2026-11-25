@@ -34,7 +34,11 @@ const heading=new Node('h2',p.section||'Your referrals');
 const area=new Node('section','',{},[heading,...inside]);
 const names=new Node('div','Synthetic Private Person private@example.invalid 12345');
 const outside=new Node('p','Friends: 88');
-const root=new Node('main','',{},[new Node('h1','Refer and earn'),linkBox,area,names,outside]);
+const summary=(p.summary||[]).flatMap(row=>[new Node(row.tag||'p',row.label),new Node(row.valueTag||'p',row.value,row.attrs||{})]);
+const otherHeading=new Node('h2',p.secondHeading||'Your friends');
+const otherArea=new Node('section','',{},[otherHeading]);
+const summaryBox=new Node('div','',{},summary);
+const root=new Node('main','',{},[new Node('h1','Refer and earn'),linkBox,area,names,outside,otherArea,summaryBox]);
 const rootQuery=root.querySelectorAll.bind(root);root.querySelectorAll=s=>s==='a,button,input[type="button"],input[type="submit"]'?[copy]:rootQuery(s);
 global.document={readyState:'complete',querySelector:s=>s==='main'?root:null,querySelectorAll:s=>[copy]};
 global.location={assign:fail,replace:fail};
@@ -59,6 +63,8 @@ class ReferralFiguresTests(unittest.TestCase):
 			{'text':'Earned referral points: 500'},{'text':'Status: pending'}])
 		self.assertEqual(figures,dict(referrals=3,friends=2,pending_points=1200,earned_points=500,referral_status='pending'))
 		self.assertFalse(referrals.SELECTORS_VERIFIED)
+		self.assertEqual(referrals.FIGURE_SELECTORS_VERIFIED,{"referrals":True,"friends":False,
+			"pending_points":True,"earned_points":True,"referral_status":False})
 
 	def test_absent_unknown_ambiguous_or_unlabelled_numbers_never_become_zero(self):
 		for rows,section in (([], 'Your referrals'),([{'text':'Unlabelled summary'},{'text':'12345'}],'Your friends'),([{'text':'Friends: 3'}],'Unverified section'),
@@ -78,6 +84,20 @@ class ReferralFiguresTests(unittest.TestCase):
 	def test_unrelated_aria_label_needs_an_explicit_referral_meaning(self):
 		self.assertEqual(self.dom([{'text':'','attrs':{'aria-label':'Pending points: 4'}}],section='Other'),{})
 		self.assertEqual(self.dom([{'text':'','attrs':{'aria-label':'Pending referral points: 4'}}],section='Other'),{'pending_points':4})
+
+	def test_observed_referral_summary_paragraph_pairs_are_explicit_figures(self):
+		# Synthetic values only. The real-page probe observed these exact label
+		# codes and P/P adjacency; its private digits never enter this fixture.
+		self.assertEqual(self.dom([],summary=[{'label':'Referrals','value':'2'},
+			{'label':'Earned points','value':'100'},{'label':'Pending points','value':'0'}]),
+			dict(referrals=2,earned_points=100,pending_points=0))
+
+	def test_summary_pair_needs_referral_context_exact_label_and_numeric_value(self):
+		for summary,other in (([{'label':'Pending points','value':'3'}],{'secondHeading':'Other'}),
+			([{'label':'Balance','value':'100'}],{}),([{'label':'Referrals','value':'Synthetic Private Person'}],{}),
+			([{'label':'Earned points','value':'3','valueTag':'div'}],{}),
+			([{'label':'Earned points','value':'3','attrs':{'hidden':True}}],{})):
+			with self.subTest(summary=summary,other=other):self.assertEqual(self.dom([],summary=summary,**other),{})
 
 	def test_later_event_without_matching_storage_makes_existing_numbers_stale(self):
 		import run_record
