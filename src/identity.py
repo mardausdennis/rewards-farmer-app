@@ -57,6 +57,35 @@ def _dashboard(url):
 		return False
 
 
+def _dashboard_greeting(driver):
+	with _private_transport():
+		if not _dashboard(driver.current_url):
+			driver.get(TARGET)
+		if not _dashboard(driver.current_url):
+			return None
+		visible = [node for node in driver.find_elements("css selector", "p.pii") if node.is_displayed()]
+		if len(visible) != 1:
+			return None
+		text = visible[0].text
+		if not isinstance(text, str) or not text.strip() or len(text) > 512 or not _dashboard(driver.current_url):
+			return None
+		return " ".join(text.split())
+
+
+def _matching_span(text, digests):
+	text = normalized(text)
+	for start in range(len(text)):
+		for end in range(start + 1, len(text) + 1):
+			candidate = text[start:end]
+			if candidate == candidate.strip() and name_hash(candidate) in digests:
+				return candidate
+	return None
+
+
+def _contains_hash(text, digests):
+	return _matching_span(text, digests) is not None
+
+
 def read_dashboard_identity(driver, expected_name=None, *, expected_name_hash=None):
 	"""Return (match|mismatch|unknown, matched-name hash or None), never raw PII.
 
@@ -68,30 +97,52 @@ def read_dashboard_identity(driver, expected_name=None, *, expected_name_hash=No
 	if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
 		return "unknown", None
 	try:
-		with _private_transport():
-			if not _dashboard(driver.current_url):
-				driver.get(TARGET)
-			if not _dashboard(driver.current_url):
-				return "unknown", None
-			elements = driver.find_elements("css selector", "p.pii")
-			visible = [node for node in elements if node.is_displayed()]
-			if len(visible) != 1:
-				return "unknown", None
-			text = normalized(visible[0].text)
-			if not text or len(text) > 512 or not _dashboard(driver.current_url):
-				return "unknown", None
-			if expected:
-				return ("match", digest) if expected in text else ("mismatch", None)
-			# Hash every bounded character span: casefold/whitespace substring
-			# matching works even where a greeting joins punctuation to the name.
-			for start in range(len(text)):
-				for end in range(start + 1, len(text) + 1):
-					candidate = text[start:end]
-					if candidate == candidate.strip() and name_hash(candidate) == digest:
-						return "match", digest
-			return "mismatch", None
+		text = normalized(_dashboard_greeting(driver))
+		if not text or len(text) > 512:
+			return "unknown", None
+		if expected:
+			return ("match", digest) if expected in text else ("mismatch", None)
+		return ("match", digest) if _contains_hash(text, {digest}) else ("mismatch", None)
 	except Exception:
 		return "unknown", None
+
+
+def require_new_identity(account_id, observation, directory=None):
+	value = load(directory)
+	digests = {binding(other, directory)["expected_name_hash"] for other in value["bindings"] if other != account_id}
+	if digests and _contains_hash(observation, digests):
+		raise IdentityError("accounts.account_already_added")
+
+
+def observe_enrollment(driver, expected_name=None, *, account_id, directory=None):
+	"""Transient raw observation for the existing human confirmation only.
+
+	Runtime read_dashboard_identity stays hash-only and never discovers a name.
+	Without matching metadata, show the whole bounded p.pii value for confirmation;
+	guessing a localized greeting's grammar could silently bind the wrong substring.
+	"""
+	try:
+		text = _dashboard_greeting(driver)
+	except Exception:
+		return "unknown", None
+	if text is None:
+		return "unknown", None
+	try:
+		require_new_identity(account_id, text, directory)
+	except IdentityError as exc:
+		if exc.code == "accounts.account_already_added":
+			return "already_added", None
+		raise
+	candidate = " ".join(expected_name.split()) if isinstance(expected_name, str) else ""
+	old = binding(account_id, directory)
+	if old is not None:
+		# Reconfirm an existing hash without silently changing it to the whole
+		# greeting when Edge has lost its optional profile-name metadata.
+		matched = _matching_span(text, {old["expected_name_hash"]})
+		if matched is not None and (not candidate or name_hash(candidate) != old["expected_name_hash"]):
+			candidate = matched
+	observation = candidate if candidate and normalized(candidate) in normalized(text) else text
+	return ("observed", observation) if len(observation) <= 256 else ("unknown", None)
 
 
 def home(directory=None):
@@ -176,6 +227,7 @@ def stage_enrollment(account_id, observed_name, *, new, directory=None):
 	old = binding(account_id, directory)
 	if old is not None and old["expected_name_hash"] != digest:
 		raise IdentityError("accounts.identity_mismatch")
+	require_new_identity(account_id, observed_name, directory)
 	value["pending"][account_id] = {"account_id": account_id, "observed_name": observed_name, "observed_hash": digest, "observed_at": utc(), "token": secrets.token_hex(16), "new": bool(new)}
 	if account_id not in value["used_ids"]: value["used_ids"].append(account_id)
 	save(value, directory)

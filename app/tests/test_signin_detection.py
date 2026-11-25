@@ -145,7 +145,7 @@ class DetectionRegressionTests(unittest.TestCase):
 		self.rewards.read_balance.return_value = None
 		self.visible.auth["profile"] = True
 		self.admin._profile_identity = lambda account: {"name":"Synthetic Person"}
-		with patch.object(identity, "read_dashboard_identity", return_value=("unknown", None)):
+		with patch.object(identity, "observe_enrollment", return_value=("unknown", None)):
 			self.assertEqual(signin.run("account-1", True, enroll=True), 1)
 		self.assertEqual(self.state()["error_code"], "identity_unknown")
 		self.assertIsNone(identity.pending("account-1", self.root))

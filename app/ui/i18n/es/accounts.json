@@ -1,6 +1,7 @@
 {
   "namespace": "accounts",
   "messages": {
+    "accounts.signin.already_added": {"text": "Esta cuenta ya está añadida. Cierra la sesión en la ventana de Edge e inicia sesión con la otra cuenta.", "src": "69c03252"},
     "accounts.invite.recovery": {"text": "Esta configuración de invitación ya no coincide con el almacenamiento actual o no se puede leer. Elimina la operación guardada sin tocar ningún perfil del navegador.", "src": "03fedf0b"},
     "accounts.invite.forget_body": {"text": "Elimina solo esta operación de invitación guardada y su confirmación pendiente. No se cambiará ningún perfil del navegador ni cuenta conectada.", "src": "745e2805"},
     "accounts.invite.title": {"text": "¿Añadir una cuenta con una invitación?", "src": "18c36a33"},

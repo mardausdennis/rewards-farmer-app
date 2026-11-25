@@ -1,6 +1,7 @@
 {
   "namespace": "accounts",
   "messages": {
+    "accounts.signin.already_added": {"text": "Questo account è già stato aggiunto. Esci nella finestra di Edge e accedi con l’altro account.", "src": "69c03252"},
     "accounts.invite.recovery": {"text": "Questa configurazione di invito non corrisponde più all’archiviazione attuale o è illeggibile. Rimuovi l’operazione salvata senza toccare alcun profilo del browser.", "src": "03fedf0b"},
     "accounts.invite.forget_body": {"text": "Rimuovi solo questa operazione di invito salvata e la relativa conferma in sospeso. Nessun profilo del browser o account collegato verrà modificato.", "src": "745e2805"},
     "accounts.invite.title": {"text": "Aggiungere un account con un invito?", "src": "18c36a33"},

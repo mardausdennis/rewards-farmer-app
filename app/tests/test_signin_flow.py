@@ -162,14 +162,15 @@ class SigninFlowTests(unittest.TestCase):
 		self.admin._recycle.assert_called_once_with([profile])
 		self.assertNotIn("REWARDS_ACCOUNTS", (self.root / ".env").read_text())
 
-	def test_failed_recycle_retains_diagnostic_path_and_releases_lock(self):
+	def test_failed_recycle_retains_value_free_diagnostic_and_releases_lock(self):
 		profile = self.profile / "account-1"
 		profile.mkdir()
 		signin._cancel_path("account-1").touch()
 		self.admin._recycle.return_value = False
 		with self.assertLogs("rfapp", "WARNING"):
 			self.assertEqual(signin.run("account-1", True), 1)
-		self.assertIn(str(profile), self.state()["detail"])
+		self.assertEqual("Profile data could not be recycled", self.state()["detail"])
+		self.assertNotIn(str(profile),json.dumps(self.state()))
 		self.assertTrue(profile.exists())
 		self.lock.release.assert_called_once()
 
@@ -269,7 +270,7 @@ class SigninFlowTests(unittest.TestCase):
 		import identity
 		(self.profile / "Local State").touch()
 		self.admin._profile_identity = Mock(return_value={"name": "Synthetic Person"})
-		with patch.object(identity, "binding", return_value={"expected_name_hash": identity.name_hash("Synthetic Person")}), patch.object(identity, "read_dashboard_identity", return_value=("match", identity.name_hash("Synthetic Person"))), patch.object(identity, "stage_enrollment"):
+		with patch.object(identity, "binding", return_value={"expected_name_hash": identity.name_hash("Synthetic Person")}), patch.object(identity, "observe_enrollment", return_value=("observed", "Synthetic Person")), patch.object(identity, "stage_enrollment"):
 			self.assertEqual(signin.run("account-2", True, enroll=True), 0)
 		self.assertEqual(self.state("account-2")["state"], "awaiting_confirmation")
 		self.admin.migrate_root_profile.assert_called_once_with("account-2")
@@ -294,7 +295,7 @@ class SigninFlowTests(unittest.TestCase):
 		value = identity.load(self.root)
 		value["bindings"]["account-1"] = {"account_id": "account-1", "expected_name_hash": identity.name_hash("Synthetic Existing"), "confirmed_at": identity.utc()}
 		identity.save(value, self.root)
-		with patch.object(identity, "read_dashboard_identity", return_value=("match", identity.name_hash("Synthetic Other Person"))):
+		with patch.object(identity, "observe_enrollment", return_value=("observed", "Synthetic Other Person")):
 			self.assertEqual(signin.run("account-2", True, enroll=True), 0)
 		self.assertEqual(self.state("account-2")["state"], "awaiting_confirmation")
 		self.assertEqual(identity.pending("account-2", self.root)["observed_name"], "Synthetic Other Person")
@@ -307,7 +308,7 @@ class SigninFlowTests(unittest.TestCase):
 		(self.profile / "account-1").mkdir()
 		(self.root / ".env").write_text("REWARDS_ACCOUNTS=account-1\nUSER_DATA_DIR=" + str(self.profile) + "\n")
 		self.admin._profile_identity = Mock(return_value={"name": "Synthetic Person"})
-		with patch.object(identity, "read_dashboard_identity", return_value=("unknown", None)):
+		with patch.object(identity, "observe_enrollment", return_value=("unknown", None)):
 			self.assertEqual(signin.run("account-1", False, enroll=True), 1)
 		self.assertIsNone(identity.pending("account-1", self.root))
 		self.assertIsNone(identity.binding("account-1", self.root))

@@ -1,6 +1,7 @@
 {
   "namespace": "accounts",
   "messages": {
+    "accounts.signin.already_added": {"text": "このアカウントは追加済みです。Edge ウィンドウでサインアウトし、別のアカウントでサインインしてください。", "src": "69c03252"},
     "accounts.invite.recovery": {"text": "この招待設定は現在の保存先と一致しないか、読み取れません。ブラウザープロファイルには触れず、保存された操作だけを削除できます。", "src": "03fedf0b"},
     "accounts.invite.forget_body": {"text": "保存されたこの招待操作と保留中の確認だけを削除します。ブラウザープロファイルや接続済みアカウントは変更されません。", "src": "745e2805"},
     "accounts.invite.title": {"text": "招待を使ってアカウントを追加しますか？", "src": "18c36a33"},

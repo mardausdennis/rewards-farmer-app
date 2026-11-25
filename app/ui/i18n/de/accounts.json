@@ -1,6 +1,7 @@
 {
   "namespace": "accounts",
   "messages": {
+    "accounts.signin.already_added": {"text": "Dieses Konto ist schon hinzugefügt. Melde dich im Edge-Fenster ab und mit dem anderen Konto an.", "src": "69c03252"},
     "accounts.invite.recovery": {"text": "Diese Einladungseinrichtung passt nicht mehr zum aktuellen Speicherort oder ist unlesbar. Entferne den gespeicherten Vorgang, ohne ein Browserprofil anzutasten.", "src": "03fedf0b"},
     "accounts.invite.forget_body": {"text": "Nur dieser gespeicherte Einladungsvorgang und seine ausstehende Bestätigung werden entfernt. Kein Browserprofil und kein verbundenes Konto wird geändert.", "src": "745e2805"},
     "accounts.invite.title": {"text": "Konto über eine Einladung hinzufügen?", "src": "18c36a33"},

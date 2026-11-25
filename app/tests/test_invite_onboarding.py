@@ -428,8 +428,8 @@ class ChildPhaseTests(InviteFixture):
 			def quit(self): events.append("quit")
 		self_test = self
 		def tick(seconds): clock.now += 901 if mode == "timeout" else seconds
-		identity_read = Mock(return_value=(identity_status, identity.name_hash("Synthetic New Person") if identity_status == "match" else None))
-		with patch.dict(sys.modules, {"browser": browser, "rewards_state": rewards}), patch.object(webdriver, "Edge", Driver), patch.object(signin.time, "monotonic", side_effect=lambda: clock.now), patch.object(signin.time, "sleep", side_effect=tick), patch.object(admin, "_profile_identity", return_value={"name": "Synthetic New Person"}), patch.object(identity, "read_dashboard_identity", identity_read), patch("rfapp.schedule.ensure") as schedule:
+		identity_read = Mock(return_value=("observed", "Synthetic New Person") if identity_status == "match" else (identity_status, None))
+		with patch.dict(sys.modules, {"browser": browser, "rewards_state": rewards}), patch.object(webdriver, "Edge", Driver), patch.object(signin.time, "monotonic", side_effect=lambda: clock.now), patch.object(signin.time, "sleep", side_effect=tick), patch.object(admin, "_profile_identity", return_value={"name": "Synthetic New Person"}), patch.object(identity, "observe_enrollment", identity_read), patch("rfapp.schedule.ensure") as schedule:
 			result = signin.run(preview["target_account_id"], True, enroll=True, invitation_id=preview["operation_id"])
 			schedule.assert_not_called()
 		self.assertEqual(settings.active_accounts(), ["account-1"])

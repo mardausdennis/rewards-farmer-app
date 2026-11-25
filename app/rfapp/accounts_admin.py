@@ -289,8 +289,8 @@ def _recycle(entries: list[Path]) -> bool:
 		function = ctypes.windll.shell32.SHFileOperationW
 		function.argtypes, function.restype = [ctypes.POINTER(FileOperation)], ctypes.c_int
 		return function(ctypes.byref(operation)) == 0 and not operation.fAnyOperationsAborted
-	except OSError:
-		_logger.exception("Could not recycle profile data")
+	except OSError as exc:
+		signin._log_failure(exc)
 		return False
 
 
@@ -479,8 +479,8 @@ def _start_signin(account_id: str, new: bool, enroll=False, invitation_id=None) 
 		except OSError:
 			subprocess.Popen(paths.launcher_command(args), creationflags=flags, **options)
 	except OSError as exc:
-		_logger.exception("Could not start the sign-in process")
-		starting = signin._write_status(account_id, "failed", "unknown", str(exc))
+		signin._log_failure(exc)
+		starting = signin._write_status(account_id, "failed", "unknown", type(exc).__name__)
 	return {key: starting[key] for key in ("account_id", "state", "error_code", "message_key", "detail", "at")}
 
 
@@ -747,6 +747,15 @@ def confirm_enrollment(account_id, confirmation_token, confirmed):
 	old = identity.binding(account_id, paths.data_home())
 	if old is not None and old["expected_name_hash"] != pending["observed_hash"]:
 		raise _error("accounts.identity_mismatch")
+	try:
+		identity.require_new_identity(account_id, pending["observed_name"], paths.data_home())
+	except identity.IdentityError as exc:
+		# Reuse the localized waiting instruction if another identity was
+		# confirmed after this observation but before the person's confirmation.
+		if exc.code == "accounts.account_already_added":
+			signin._write_status(account_id, "failed", "account_already_added")
+			raise _error("accounts.enrollment_required") from None
+		raise
 	value = json.loads(json.dumps(before))
 	value["bindings"][account_id] = old or {"account_id": account_id, "expected_name_hash": pending["observed_hash"], "confirmed_at": identity.utc()}
 	active, paused = settings.active_accounts(), settings.paused_accounts()

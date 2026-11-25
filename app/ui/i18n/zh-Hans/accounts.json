@@ -1,6 +1,7 @@
 {
   "namespace": "accounts",
   "messages": {
+    "accounts.signin.already_added": {"text": "此帐户已添加。请在 Edge 窗口中退出登录，然后使用另一个帐户登录。", "src": "69c03252"},
     "accounts.invite.recovery": {"text": "此邀请设置与当前存储位置不匹配或无法读取。可以仅移除已保存的操作，不触碰任何浏览器配置文件。", "src": "03fedf0b"},
     "accounts.invite.forget_body": {"text": "仅移除此已保存的邀请操作及其待确认内容。不会更改任何浏览器配置文件或已连接账户。", "src": "745e2805"},
     "accounts.invite.title": {"text": "使用邀请添加账户？", "src": "18c36a33"},

@@ -242,10 +242,12 @@ class AccountsAdminTests(unittest.TestCase):
 		self.assertEqual(first.kwargs["creationflags"] & ~getattr(admin.subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0), second.kwargs["creationflags"])
 
 	def test_process_launch_failure_is_recorded(self):
-		with patch("rfapp.accounts_admin.subprocess.Popen", side_effect=OSError("denied")), self.assertLogs("rfapp", "ERROR"):
+		with patch("rfapp.accounts_admin.subprocess.Popen", side_effect=OSError("denied synthetic private name")), self.assertLogs("rfapp", "ERROR") as records:
 			status = admin._start_signin("account-1", True)
 		self.assertEqual(status["state"], "failed")
-		self.assertIn("denied", status["detail"])
+		self.assertEqual(status["detail"], "OSError")
+		self.assertNotIn("denied synthetic private name", json.dumps(status) + "\n".join(records.output))
+		self.assertIn('"exception": "OSError"', "\n".join(records.output))
 
 	def test_status_grace_dead_pid_and_cancel(self):
 		starting = signin._write_status("account-1", "starting")

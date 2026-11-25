@@ -1,6 +1,7 @@
 {
   "namespace": "accounts",
   "messages": {
+    "accounts.signin.already_added": {"text": "Esta conta já foi adicionada. Saia na janela do Edge e entre com a outra conta.", "src": "69c03252"},
     "accounts.invite.recovery": {"text": "Esta configuração por convite não corresponde mais ao armazenamento atual ou está ilegível. Remova a operação salva sem alterar nenhum perfil do navegador.", "src": "03fedf0b"},
     "accounts.invite.forget_body": {"text": "Remova apenas esta operação de convite salva e sua confirmação pendente. Nenhum perfil do navegador ou conta conectada será alterado.", "src": "745e2805"},
     "accounts.invite.title": {"text": "Adicionar uma conta com um convite?", "src": "18c36a33"},

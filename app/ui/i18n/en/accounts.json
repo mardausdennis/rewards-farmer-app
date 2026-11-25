@@ -58,6 +58,7 @@
     "accounts.remove.delete": {"text": "Remove and move data to the Recycle Bin", "note": "Destructive action calls remove_account with delete_data true. Use the official localized Windows Recycle Bin name."},
     "accounts.remove.success": {"text": "Account removed", "note": "Shown only after remove_account succeeds, never for root_recycle_failed."},
     "accounts.signin.title": {"text": "Microsoft sign-in", "note": "Heading above the active or terminal sign-in status."},
+    "accounts.signin.already_added": {"text": "This account is already added. Sign out in the Edge window and sign in with the other account.", "note": "Enrollment remains waiting while the dashboard matches an already confirmed identity. No name is included and cancellation remains available."},
     "accounts.signin.starting": {"text": "Opening Microsoft Edge", "note": "SigninStatus starting, the app has requested a sign-in process."},
     "accounts.signin.waiting": {"text": "Finish signing in using the Edge window. If Windows is already signed in with a Microsoft account, the app may connect that account for you.", "note": "SigninStatus waiting. The person signs in with their own Microsoft account in Edge. Enrollment then asks them to confirm the name Microsoft displays before registering the account."},
     "accounts.signin.verifying": {"text": "Checking that your sign-in was saved", "note": "SigninStatus verifying after the visible window closes or the first balance check misses it."},

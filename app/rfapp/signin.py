@@ -18,6 +18,22 @@ from rfapp.envfile import EnvFile
 
 _logger = logging.getLogger("rfapp")
 
+
+def _log_failure(exc):
+	# Traceback formatting includes messages, source lines and absolute paths.
+	# Read frame metadata directly, without inspecting locals or formatting exc.
+	frames = []
+	trace = exc.__traceback__
+	while trace is not None:
+		code = trace.tb_frame.f_code
+		file = code.co_filename.replace("\\", "/").rsplit("/", 1)[-1]
+		function = code.co_name
+		frames.append({"file": file if re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", file) else "<dynamic>",
+			"line": trace.tb_lineno, "function": function if re.fullmatch(r"[A-Za-z0-9_.<>]{1,128}", function) else "<dynamic>"})
+		trace = trace.tb_next
+	_logger.error("signin_failure %s", json.dumps({"exception": type(exc).__name__, "frames": frames}, sort_keys=True))
+
+
 _SIGNIN_SIGNALS = r"""
 const visible = node => {
 	const r = node.getBoundingClientRect(), s = getComputedStyle(node);
@@ -71,7 +87,11 @@ def _detection(driver, rewards_state, elements) -> tuple[str, dict]:
 	matched = structure.get("matched", {})
 	if auth.get("signin") or matched.get("signin", 0):
 		return "signed_out", structure
-	if matched.get("consent", 0) or matched.get("error", 0):
+	if matched.get("error", 0):
+		return "unknown", structure
+	# A cookie banner does not negate a visible dashboard identity. Keep the
+	# farmer's rendered/blank-page rules intact and do not accept consent here.
+	if matched.get("consent", 0) and not (url.path.rstrip("/").casefold() == "/dashboard" and auth.get("identity")):
 		return "unknown", structure
 	if not auth.get("complete"):
 		return "unknown", structure
@@ -114,6 +134,8 @@ def _write_status(account_id: str, state: str, error_code: str | None = None, de
 			value["message_key"] = "accounts.invite." + ("waiting" if state == "invite_waiting" else "interrupted")
 		if isinstance(error_code, str) and error_code.startswith("accounts.invite_"):
 			value["message_key"] = "errors.app." + error_code.replace(".", "_")
+	if error_code in ("account_already_added", "accounts.account_already_added"):
+		value["message_key"] = "accounts.signin.already_added"
 	path = _status_path(account_id)
 	name = None
 	try:
@@ -185,16 +207,17 @@ def _run_invitation(account_id, op_id):
 					_write_status(account_id, "verifying", invitation=invite.read(op_id))
 					visible.get("https://rewards.bing.com/")
 					candidate = accounts_admin._profile_identity(account_id).get("name")
-					matched, _ = identity.read_dashboard_identity(visible, candidate)
-					if matched != "match":
-						code = "identity_unknown" if matched == "unknown" else "accounts.identity_mismatch"
+					matched, observation = identity.observe_enrollment(visible, candidate, account_id=account_id, directory=paths.data_home())
+					if matched != "observed":
+						code = "account_already_added" if matched == "already_added" else "identity_unknown"
 						break
-					invite.stage_confirmation(op_id, candidate)
+					invite.stage_confirmation(op_id, observation)
 					state = "awaiting_confirmation"
 					break
 				time.sleep(.25)
 	except Exception as exc:
 		# Do not emit exception messages: Selenium may include the invitation URL.
+		_log_failure(exc)
 		code = exc.code if getattr(exc, "code", "").startswith("accounts.invite_") else "accounts.invite_unknown"
 	finally:
 		with referrals._private_transport(): _quit(visible)
@@ -282,6 +305,7 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 			visible.set_page_load_timeout(60)
 			visible.get("https://rewards.bing.com/")
 		except WebDriverException as exc:
+			_log_failure(exc)
 			error_code, detail = browser.start_failure_code(exc), type(exc).__name__
 		else:
 			_write_status(account_id, "waiting")
@@ -290,6 +314,7 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 			verify = True
 			unknown_since = None
 			terms_visible = False
+			already_added = False
 			while time.monotonic() < deadline:
 				if _cancel_path(account_id).exists():
 					state, verify = "cancelled", False
@@ -304,11 +329,27 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 				if observed == "signed_in":
 					if enroll:
 						candidate = accounts_admin._profile_identity(account_id).get("name")
-						matched, _ = identity.read_dashboard_identity(visible, candidate)
-						observed_name = candidate if matched == "match" else None
+						matched, observed_name = identity.observe_enrollment(visible, candidate, account_id=account_id, directory=paths.data_home())
+						if matched == "already_added":
+							if not already_added:
+								_write_status(account_id, "waiting", "account_already_added")
+							already_added = True
+							unknown_since = None
+							time.sleep(2)
+							continue
 					time.sleep(3)
+					if enroll and not _cancel_path(account_id).exists():
+						# The person can switch accounts during the save grace period.
+						matched, observed_name = identity.observe_enrollment(visible, candidate, account_id=account_id, directory=paths.data_home())
+						if matched == "already_added":
+							_write_status(account_id, "waiting", "account_already_added")
+							already_added = True
+							continue
 					state, verify = ("cancelled" if _cancel_path(account_id).exists() else "signed_in"), False
 					break
+				if already_added:
+					_write_status(account_id, "waiting")
+					already_added = False
 				if observed == "unknown":
 					unknown_since = time.monotonic() if unknown_since is None else unknown_since
 					# An unrecognised Rewards page should not leave the person at
@@ -341,12 +382,14 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 						state = "signed_in"
 						if enroll:
 							candidate = accounts_admin._profile_identity(account_id).get("name")
-							matched, _ = identity.read_dashboard_identity(verification, candidate)
-							observed_name = candidate if matched == "match" else None
+							matched, observed_name = identity.observe_enrollment(verification, candidate, account_id=account_id, directory=paths.data_home())
+							if matched == "already_added":
+								state, error_code = "failed", "account_already_added"
 					else:
 						state, error_code, keep_profile = "failed", "page_unrecognized", True
 						diagnostic = _record_structure("verification", structure, "page_unrecognized")
 				except WebDriverException as exc:
+					_log_failure(exc)
 					state, error_code, detail = "failed", browser.start_failure_code(exc), type(exc).__name__
 				finally:
 					_quit(verification)
@@ -368,9 +411,11 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 			editor.save()
 			schedule.ensure()
 	except Exception as exc:
-		_logger.error("Sign-in failed for profile %s (%s)", account_id, type(exc).__name__)
+		_log_failure(exc)
 		state = "failed"
 		error_code = getattr(exc, "code", "unknown")
+		if error_code not in ("accounts.identity_mismatch", "accounts.account_already_added", "profile_in_use", "identity_unknown", "enrollment_required"):
+			error_code = "unknown"
 		detail = type(exc).__name__
 	finally:
 		_quit(visible)
@@ -378,8 +423,8 @@ def run(account_id, new, enroll=False, invitation_id=None) -> int:
 		try:
 			if new and not session_saved and not keep_profile and state in ("failed", "cancelled", "timed_out") and profile.exists():
 				if not accounts_admin._recycle([profile]):
-					_logger.warning("Sign-in profile could not be recycled: %s", profile)
-					detail = (detail + "; " if detail else "") + f"Profile data could not be recycled: {profile}"
+					_logger.warning("Sign-in profile could not be recycled")
+					detail = (detail + "; " if detail else "") + "Profile data could not be recycled"
 			_write_status(account_id, state, error_code, detail, diagnostic=diagnostic)
 			_cancel_path(account_id).unlink(missing_ok=True)
 		finally:
