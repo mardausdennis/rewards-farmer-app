@@ -214,8 +214,10 @@ class EnrollmentSigninTests(unittest.TestCase):
 		self.lock.release.assert_called_once()
 
 	def test_recycle_failure_log_never_contains_exception_path_or_message(self):
-		with patch("ctypes.windll.shell32.SHFileOperationW",side_effect=OSError("C:/Users/Synthetic Secret/Name")),self.assertLogs("rfapp",logging.ERROR) as records:
+		operation = Mock(side_effect=OSError("C:/Users/Synthetic Secret/Name"))
+		with patch.object(real_admin.ctypes,"windll",SimpleNamespace(shell32=SimpleNamespace(SHFileOperationW=operation)),create=True),self.assertLogs("rfapp",logging.ERROR) as records:
 			self.assertFalse(real_admin._recycle([self.profile/"account-2"]))
+		operation.assert_called_once()
 		text = "\n".join(records.output)
 		self.assertIn('"exception": "OSError"',text)
 		self.assertNotIn("Synthetic Secret",text)
