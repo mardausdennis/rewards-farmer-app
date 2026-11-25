@@ -559,7 +559,7 @@ function dialogTabbables(dialog) {
 function nextDialog() {
     if (activeDialog || !dialogRequests.length) return;
     const request = dialogRequests.shift();
-    const { titleKey, bodyKey, params = {}, actions: items = [] } = request.props;
+    const { titleKey, bodyKey, params = {}, content = null, defaultAction = null, actions: items = [] } = request.props;
     const dialog = document.getElementById("dialog");
     activeDialog = request;
     let result = "cancel";
@@ -591,14 +591,18 @@ function nextDialog() {
         request.resolve(result);
         queueMicrotask(nextDialog);
     };
-    dialog.replaceChildren(el("h2", { id: "dialog-title", text: t(titleKey, params) }), el("p", { id: "dialog-body", text: t(bodyKey, params) }), actions(items.map((item) => builders.button({ ...item, onClick: () => finish(item.id) }))));
+    dialog.replaceChildren(el("h2", { id: "dialog-title", text: t(titleKey, params) }), el("p", { id: "dialog-body", text: t(bodyKey, params) }), ...(content ? [content] : []), actions(items.map((item) => {
+        const button = builders.button({ ...item, onClick: () => finish(item.id) });
+        button.dataset.dialogAction = item.id;
+        return button;
+    })));
     attrs(dialog, { "aria-labelledby": "dialog-title", "aria-describedby": "dialog-body", tabindex: -1 });
     dialog.addEventListener("keydown", trap, true);
     dialog.addEventListener("cancel", cancel);
     dialog.addEventListener("close", close, { once: true });
     try {
         dialog.showModal();
-        (dialogTabbables(dialog)[0] || dialog).focus();
+        (dialogTabbables(dialog).find(node => defaultAction && node.dataset.dialogAction === defaultAction) || dialogTabbables(dialog)[0] || dialog).focus();
     } catch (error) {
         dialog.removeEventListener("keydown", trap, true);
         dialog.removeEventListener("cancel", cancel);

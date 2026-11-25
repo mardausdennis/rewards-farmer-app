@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "note": "Synthetic 0.3.11 per-account Microsoft figures and local inviter provenance. No browser account is opened. The mock bridge composes existing complete account and invitation envelopes.",
+  "ui0311": {"account_count": 3},
+  "referral_responses": {
+    "account-1": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC_ONE", "link_found": true, "referrals": 4, "friends": 3, "pending_points": 250, "earned_points": 1000, "referral_status": "mixed", "figures_read_at": "2026-11-25T17:00:00Z", "figures_state": "read", "read_at": "2026-11-25T16:00:00Z", "unreadable": null},
+    "account-2": {"link": null, "link_found": false, "referrals": null, "friends": null, "pending_points": null, "earned_points": null, "referral_status": null, "figures_read_at": null, "figures_state": "unknown", "read_at": "2026-11-25T17:05:00Z", "unreadable": "not_read"},
+    "account-3": {"link": "https://rewards.bing.com/refer?code=SYNTHETIC_THREE", "link_found": true, "referrals": 2, "friends": 1, "pending_points": 0, "earned_points": 500, "referral_status": "completed", "figures_read_at": "2026-11-24T10:00:00Z", "figures_state": "stale", "read_at": "2026-11-24T09:00:00Z", "unreadable": "page_unknown"}
+  },
+  "methods": {},
+  "pushes": []
+}

@@ -1,0 +1,7 @@
+{
+  "synthetic": true,
+  "note": "Synthetic six-account household admission. Every add-flow guard consumes only explicit household_ack. Nothing is enrolled until the UI confirms the observed synthetic name.",
+  "ui0311": {"account_count": 6},
+  "methods": {},
+  "pushes": []
+}

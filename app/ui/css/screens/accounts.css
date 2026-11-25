@@ -3,6 +3,14 @@
 .accounts-help { color: var(--c-text-2); max-inline-size: 70ch; }
 .accounts-list { border-block-start: 1px solid var(--c-border); }
 .accounts-entry { min-inline-size: 0; }
+.accounts-invited-by, .accounts-referral-source, .accounts-referral-figures-read { color: var(--c-text-2); font-size: var(--fs-2); overflow-wrap: anywhere; }
+.accounts-referrals > .field { max-inline-size: 440px; }
+.accounts-referral-figures-read.is-stale { color: var(--c-warning); }
+.accounts-household { display: grid; gap: var(--sp-4); margin-block: var(--sp-4); }
+.accounts-household blockquote { margin: 0; padding-inline-start: var(--sp-4); border-inline-start: 3px solid var(--c-border); }
+.accounts-household-source { display: grid; gap: var(--sp-1); color: var(--c-text-2); font-size: var(--fs-2); overflow-wrap: anywhere; }
+.accounts-household-check { display: flex; align-items: start; gap: var(--sp-3); }
+.accounts-household-check input { margin-block-start: 0.25em; flex: 0 0 auto; accent-color: var(--c-accent); }
 .accounts-list > #accounts-add-another { margin-block: var(--sp-4); }
 .accounts-identity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); padding-block-end: var(--sp-3); font-size: var(--fs-2); color: var(--c-text-2); overflow-wrap: anywhere; }
 .accounts-identity[data-identity-check="mismatch"] { color: var(--c-danger); }

@@ -7,18 +7,22 @@ export function invitations(ctx, changed) {
     const t = i18n.t;
     let alive = true, generation = 0, loading = true, pending = false;
     let friends = [], friendsError = null, referral = null, referralError = null, edit = null, saveError = null;
+    let accounts = [], selectedId = null;
     const button = (id, props) => { const node = c.button.create(props); node.id = id; return node; };
     const editButtonId = (id) => `accounts-friend-edit-${id}`;
 
-    async function load() {
+    async function load(nextAccounts) {
+        if (Array.isArray(nextAccounts)) accounts = nextAccounts;
+        if (!accounts.some(account => account.id === selectedId)) selectedId = accounts.find(account => !account.paused)?.id || accounts[0]?.id || null;
         const token = ++generation;
         loading = true;
+        referral = null;
         friendsError = referralError = null;
         changed();
         await Promise.all([
             bridge.call("get_invited_friends").then((data) => { if (alive && token === generation) friends = data.invited_friends; })
                 .catch((error) => { if (alive && token === generation) friendsError = error; }),
-            bridge.call("get_referral_info").then((data) => { if (alive && token === generation) referral = data; })
+            bridge.call("get_referral_info", selectedId ? { account_id: selectedId } : {}).then((data) => { if (alive && token === generation) referral = data; })
                 .catch((error) => { if (alive && token === generation) { referral = null; referralError = error; } }),
         ]);
         if (alive && token === generation) { loading = false; changed(); }
@@ -125,6 +129,9 @@ export function invitations(ctx, changed) {
 
     function referralSection() {
         const section = el("section", { class: "accounts-referrals", "aria-labelledby": "accounts-referrals-title" }, el("h2", { id: "accounts-referrals-title", text: t("accounts.referrals.title") }));
+        section.setAttribute("aria-busy", String(loading));
+        if (accounts.length > 1) section.append(c.select.create({ id: "accounts-referral-account", labelKey: "accounts.referrals.account", value: selectedId, options: accounts.map(account => ({ value: account.id, label: account.label })), onChange: id => { selectedId = id; load(); } }));
+        section.append(el("p", { class: "accounts-referral-source", text: t("accounts.referrals.microsoft_figures") }));
         if (loading) { section.append(c.spinner.create({ labelKey: "common.action.working" })); return section; }
         if (referralError) { section.append(c.banner.create({ tone: "error", messageKey: referralError.messageKey, params: referralError.params, actions: [{ labelKey: "common.action.retry", onClick: load }] })); return section; }
         if (!referral) return section;
@@ -147,11 +154,14 @@ export function invitations(ctx, changed) {
             section.append(el("div", { class: "accounts-referral-copy" }, [field, button("accounts-referral-copy", { labelKey: "accounts.referrals.copy", onClick: copy })]), feedback);
         } else section.append(el("p", { class: "accounts-referral-unavailable", text: t("accounts.referrals.link_unknown") }));
         const figures = el("dl", { class: "accounts-referral-figures" });
-        for (const [key, count] of [["referrals", referral.referrals], ["friends", Array.isArray(referral.friends) ? referral.friends.length : null]]) {
+        for (const [key, count] of [["referrals", referral.referrals], ["friends", referral.friends], ["pending_points", referral.pending_points], ["earned_points", referral.earned_points]]) {
             figures.append(el("div", {}, [el("dt", { text: t(`accounts.referrals.${key}`) }), el("dd", { "data-referral-figure": key, text: Number.isInteger(count) && count >= 0 ? i18n.formatNumber(count) : t("accounts.referrals.unknown") })]));
         }
+        const status = ["pending", "completed", "mixed"].includes(referral.referral_status) ? t(`accounts.referrals.status.${referral.referral_status}`) : t("accounts.referrals.unknown");
+        figures.append(el("div", {}, [el("dt", { text: t("accounts.referrals.status") }), el("dd", { "data-referral-status": referral.referral_status || "unknown", text: status })]));
         section.append(figures);
-        if (referral.read_at) section.append(el("p", { class: "accounts-referral-read" }, el("time", { datetime: referral.read_at, text: t("accounts.referrals.read_at", { date: i18n.formatDate(referral.read_at), time: i18n.formatTime(referral.read_at) }) })));
+        if (["read", "stale"].includes(referral.figures_state) && referral.figures_read_at) section.append(el("p", { class: `accounts-referral-figures-read${referral.figures_state === "stale" ? " is-stale" : ""}`, "data-figures-state": referral.figures_state }, el("time", { datetime: referral.figures_read_at, text: t(referral.figures_state === "stale" ? "accounts.referrals.last_read" : "accounts.referrals.figures_read_at", { date: i18n.formatDate(referral.figures_read_at), time: i18n.formatTime(referral.figures_read_at) }) })));
+        if (referral.read_at) section.append(el("p", { class: "accounts-referral-read" }, el("time", { datetime: referral.read_at, text: t("accounts.referrals.link_read_at", { date: i18n.formatDate(referral.read_at), time: i18n.formatTime(referral.read_at) }) })));
         if (referral.unreadable !== null) {
             const code = referralUnreadableCodes.includes(referral.unreadable) ? referral.unreadable : "storage_unreadable";
             section.append(el("p", { class: "accounts-referral-status", role: "status", "data-referral-unreadable": code, text: t(`accounts.referrals.unreadable.${code}`) }));

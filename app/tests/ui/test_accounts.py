@@ -285,7 +285,9 @@ class AccountsTests(unittest.TestCase):
 		 assert(!s.get('accounts').some(account=>account.id===friend),'F104 friend never enters account store');
 		 const actionIds=[...row.querySelectorAll('button:not(:disabled)')].map(button=>button.id);
 		 assert(actionIds.length===2&&actionIds.every(id=>id.startsWith('accounts-friend-edit-')||id.startsWith('accounts-friend-remove-')),'F104 only note edit and remove');
-		 assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F104 null referral figures stay unknown');
+		 const api=window.pywebview.api,unknown=await api.get_referral_info({account_id:'account-1'});assert(unknown.data.figures_state==='unknown','F104 explicit null fixture');api.get_referral_info=async()=>structuredClone(unknown);
+		 const router=await import('./js/router.js');router.navigate('#/overview');await wait(()=>document.querySelector('.overview-screen'));router.navigate('#/accounts');await wait(()=>document.querySelector('.accounts-referrals')?.getAttribute('aria-busy')==='false');
+		 const figures=[...document.querySelectorAll('[data-referral-figure]')];assert(figures.length===4&&figures.every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F104 null referral figures stay unknown for selected account');
 		 assert(document.querySelector('.accounts-referral-read time').dateTime==='2026-10-25T22:00:00Z','F104 read timestamp');
 		 """)
 		self.assertEqual([],_harness.errors())
@@ -353,7 +355,7 @@ class AccountsTests(unittest.TestCase):
 		  assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F104 null not zero '+code);
 		  assert(document.querySelector('.accounts-referral-read time').dateTime===info.read_at,'F111 retained link keeps its own read time '+code);
 		 }
-		 info={link:null,link_found:false,referrals:0,friends:[],read_at:null,unreadable:null};await remount();
+		 info={link:null,link_found:false,referrals:0,friends:0,pending_points:0,earned_points:0,referral_status:null,figures_read_at:null,figures_state:'unknown',read_at:null,unreadable:null};await remount();
 		 assert([...document.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.formatNumber(0)),'F104 observed zero is distinct from unknown');
 		 assert(!document.querySelector('.accounts-referral-read')&&!document.getElementById('accounts-referral-copy'),'F104 absent timestamp and link not invented');
 		 assert(!document.getElementById('accounts-referral-link')&&document.querySelector('.accounts-referral-unavailable').textContent===i.t('accounts.referrals.link_unknown'),'F111 null link keeps exact unavailable text');
@@ -374,7 +376,7 @@ class AccountsTests(unittest.TestCase):
 			 assert(link.value===response.data.link&&link.readOnly&&!document.getElementById('accounts-referral-copy').disabled,'F111 retained link field and Copy');
 			 assert(section.querySelector('[data-referral-unreadable]').textContent===i.t('accounts.referrals.unreadable.page_unknown'),'F111 exact latest failed-attempt status');
 			 assert([...section.querySelectorAll('[data-referral-figure]')].every(node=>node.textContent===i.t('accounts.referrals.unknown')),'F111 failed attempt never invents figures');
-			 const time=section.querySelector('time');assert(time.dateTime===response.data.read_at&&time.textContent===i.t('accounts.referrals.read_at',{date:i.formatDate(response.data.read_at),time:i.formatTime(response.data.read_at)}),'F111 link own read time unchanged');
+			 const time=section.querySelector('.accounts-referral-read time');assert(time.dateTime===response.data.read_at&&time.textContent===i.t('accounts.referrals.link_read_at',{date:i.formatDate(response.data.read_at),time:i.formatTime(response.data.read_at)}),'F111 link own read time unchanged');
 			 section.scrollIntoView({block:'start'});document.activeElement?.blur();await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 			 assert(section.getBoundingClientRect().top>=0&&section.getBoundingClientRect().bottom<=innerHeight,'F111 complete referral section visible');
 			 """)

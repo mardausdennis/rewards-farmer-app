@@ -34,6 +34,7 @@ export async function install() {
         return response.json();
     };
     const [defaults, chosen] = await Promise.all([load("shell/defaults.json"), load(`${fixture}.json`)]);
+    const ui0311Seed = chosen.ui0311 ? await load("accounts/invite-onboarding.json") : null;
     const multi = ["multi-account", "multi-account-unconfirmed"].includes(chosen.scenario);
     const multiSeed = multi ? await load("accounts/multi-account.json") : null;
     const edgeSeed = chosen.edge_streak ? await load("settings/automatic.json") : null;
@@ -41,8 +42,15 @@ export async function install() {
         get_invited_friends: { ok: true, data: { invited_friends: [] } },
         get_referral_info: { ok: true, data: { link: null, link_found: false, referrals: null, friends: null, read_at: null, unreadable: "not_read" } },
         list_invite_operations: { ok: true, data: { operations: [] } },
-        ...defaults.methods, ...(multiSeed?.methods || {}), ...(edgeSeed?.methods || {}), ...chosen.methods,
+        ...defaults.methods, ...(multiSeed?.methods || {}), ...(edgeSeed?.methods || {}), ...(ui0311Seed?.methods || {}), ...chosen.methods,
     };
+    let householdRows = null, householdSource = null;
+    if (chosen.ui0311) {
+        const seed = resolveEnvelope("list_accounts", methods.list_accounts, {}).data.accounts[0];
+        householdRows = Array.from({ length: chosen.ui0311.account_count }, (_, index) => ({ ...structuredClone(seed), id: `account-${index + 1}`, label: ["Jamie", "Riley", "Morgan"][index] || `Synthetic ${index + 1}`, dir: `C:\\Synthetic\\account-${index + 1}`, paused: index === 1, identity_status: "confirmed", identity_confirmed_at: "2026-11-25T17:00:00Z", identity_last_status: null, identity_checked_at: null, invited_by: index === 1 ? "account-1" : index === 2 ? "removed-source" : null, invited_by_removed: index === 2 }));
+        methods.list_accounts = { ok: true, data: { accounts: householdRows } };
+        methods.list_invite_operations = { ok: true, data: { operations: [] } };
+    }
     let edgeState = chosen.edge_streak ? structuredClone(chosen.edge_streak) : null;
     if (edgeState) for (const account of edgeState.accounts) account.at = new Date().toISOString();
     const timers = new Set();
@@ -114,6 +122,32 @@ export async function install() {
     }
     const api = Object.fromEntries(methodNames.map((method) => [method, async (request = {}) => {
         let response = resolveEnvelope(method, methods[method], request);
+        if (chosen.ui0311) {
+            const protectedCall = ["add_account", "begin_enrollment", "preview_invite_account", "start_invite_account", "confirm_enrollment"].includes(method);
+            if (protectedCall && householdRows.length >= 6 && request.household_ack !== true) return { ok: false, error: { code: "accounts.household_limit", message_key: "errors.app.accounts_household_limit", params: { count: householdRows.length, limit: 6 }, detail: null, fields: null } };
+            if (method === "get_referral_info" && chosen.referral_responses) response = { ok: true, data: structuredClone(chosen.referral_responses[request.account_id] || chosen.referral_responses["account-2"]) };
+            const target = `account-${householdRows.length + 1}`;
+            if (method === "preview_invite_account" && response.ok) response.data.invitation = { ...response.data.invitation, source_account_id: request.source_account_id, target_account_id: target };
+            if (method === "start_invite_account" && response.ok) {
+                householdSource = response.data.signin.invitation.source_account_id;
+                response.data.account_id = target;
+                response.data.signin.account_id = target;
+                response.data.signin.invitation.target_account_id = target;
+            }
+            if (["add_account", "begin_enrollment"].includes(method)) {
+                householdSource = null;
+                const accountId = request.account_id || target;
+                response = { ok: true, data: { ...(method === "add_account" ? { account_id: accountId } : {}), signin: mockStatus(accountId, "starting") } };
+            }
+            if (method === "get_enrollment_status") response = { ok: true, data: { account_id: request.account_id, state: "awaiting_confirmation", observed_name: "Synthetic New", confirmation_token: "00000000000000000000000000000311", observed_at: "2026-11-25T17:10:00Z", same_name_limit: true } };
+            if (method === "confirm_enrollment") response = { ok: true, data: { account_id: request.account_id, identity_status: "confirmed", confirmed_at: "2026-11-25T17:10:00Z", managed: true, same_name_limit: true } };
+            if (method === "cancel_signin") { response = { ok: true, data: {} }; emit(mockStatus(request.account_id, "cancelled")); }
+            if (method === "confirm_enrollment" && response.ok) {
+                const target = request.account_id;
+                if (!householdRows.some(account => account.id === target)) householdRows.push({ ...structuredClone(householdRows[0]), id: target, label: "Synthetic New", invited_by: householdSource, invited_by_removed: false });
+                methods.list_accounts = { ok: true, data: { accounts: householdRows } };
+            }
+        }
         if (multi) response = multiResponse(method, request, response);
         if (chosen.edge_results && method === "get_live") response = { ok: true, data: { run: { ...scopedRun(null), active: true, ended_at: null, result: null, result_key: null }, log: null } };
         if (response.ok) {

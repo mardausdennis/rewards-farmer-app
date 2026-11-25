@@ -1,6 +1,7 @@
 import { el } from "../dom.js";
 import { activeStates, statusKeys, signinFlow } from "./accounts/signin.js";
 import { invitations } from "./accounts/invitations.js";
+import { householdFlow } from "./accounts/household.js";
 
 export async function mount(view, ctx) {
     const { bridge, i18n, store, router, components: c } = ctx;
@@ -18,7 +19,8 @@ export async function mount(view, ctx) {
     const openActions = new Set();
     const root = el("section", { class: "screen accounts-screen", "data-screen": "accounts" });
     view.append(root);
-    const flow = signinFlow(ctx, { accepts: (id) => accounts.some((a) => a.id === id) || flow.status?.account_id === id, changed: render, connected: refresh, awaiting: enrollment });
+    const household = householdFlow(ctx, () => accounts);
+    const flow = signinFlow(ctx, { accepts: (id) => accounts.some((a) => a.id === id) || flow.status?.account_id === id, changed: render, connected: refresh, awaiting: enrollment, ended: household.reset, call: household.call });
     const invited = invitations(ctx, render);
     const button = (id, props) => { const node = c.button.create(props); node.id = id; return node; };
     const keyId = (account) => encodeURIComponent(account.id);
@@ -34,12 +36,11 @@ export async function mount(view, ctx) {
         store.set("appInfo", { ...store.get("appInfo"), has_accounts: next.length > 0 });
     }
     async function refresh() {
-        const invitationLoad = invited.load();
         try {
             const data = await bridge.call("list_accounts");
             if (alive) { sync(data.accounts); loaded = true; }
         } catch (err) { if (alive) error = err; }
-        await invitationLoad;
+        await invited.load(accounts);
         try {
             const data = await bridge.call("list_invite_operations");
             if (alive) inviteOperations = data.operations;
@@ -92,12 +93,13 @@ export async function mount(view, ctx) {
             }
             if (!alive) return;
             if (choice !== "confirm") { if (!dismissed) await flow.cancel(); return; }
-            await bridge.call("confirm_enrollment", { account_id: status.account_id, confirmation_token: observed.confirmation_token, confirmed: true });
+            await household.call("confirm_enrollment", { account_id: status.account_id, confirmation_token: observed.confirmation_token, confirmed: true });
             if (!alive) return;
             flow.confirmed();
+            household.reset();
             error = null;
             await refresh();
-        } catch (err) { if (alive) error = err; }
+        } catch (err) { if (alive && !err.householdCancelled) error = err; }
         finally { confirming = false; render(dismissed ? "accounts-confirm-enrollment" : undefined); }
     }
     async function beginEnrollment(account) {
@@ -108,6 +110,10 @@ export async function mount(view, ctx) {
     async function addAccount(confirmMigration = false, normal = false) {
         if (busyId || confirming || flow.pending || activeStates.has(flow.status?.state)) return;
         if (flow.status?.state === "awaiting_confirmation") { await enrollment(flow.status); return; }
+        if (!confirmMigration && !normal) {
+            household.reset();
+            if (!await household.ensure() || !alive) return;
+        }
         const unconfirmed = accounts.find((account) => account.identity_status !== "confirmed");
         if (unconfirmed) { await beginEnrollment(unconfirmed); return; }
         if (!confirmMigration && !normal) {
@@ -121,9 +127,11 @@ export async function mount(view, ctx) {
         try { await flow.start("add_account", confirmMigration ? { confirm_migration: true } : {}); }
         catch (err) {
             if (!alive) return;
+            if (err.householdCancelled) return;
             if (err.code === "accounts.migration_needed" && !confirmMigration) {
                 const choice = await c.dialog.open({ titleKey: "accounts.migration.title", bodyKey: "errors.app.accounts_migration_needed", actions: [{ id: "cancel", labelKey: "common.action.cancel", variant: "ghost" }, { id: "confirm", labelKey: "accounts.migration.confirm", variant: "primary" }] });
                 if (alive && choice === "confirm") await addAccount(true);
+                else household.reset();
             } else if (err.code === "accounts.enrollment_required") {
                 await refresh();
                 const first = accounts.find((account) => account.identity_status !== "confirmed");
@@ -137,9 +145,9 @@ export async function mount(view, ctx) {
         error = null;
         render();
         try {
-            const data = await bridge.call("preview_invite_account", { source_account_id: operation?.source_account_id || inviteSource, ...(operation ? { operation_id: operation.operation_id } : {}) });
+            const data = await household.call("preview_invite_account", { source_account_id: operation?.source_account_id || inviteSource, ...(operation ? { operation_id: operation.operation_id } : {}) });
             if (alive) { invitePreview = data.invitation; inviteChoice = true; }
-        } catch (err) { if (alive) error = err; }
+        } catch (err) { if (alive && !err.householdCancelled) error = err; }
         finally { invitePending = false; render("accounts-invite-open"); }
     }
     async function startInvitation() {
@@ -149,7 +157,7 @@ export async function mount(view, ctx) {
         try {
             await flow.start("start_invite_account", { operation_id: invitePreview.operation_id, preview_token: invitePreview.preview_token });
             if (alive) { inviteChoice = false; invitePreview = null; }
-        } catch (err) { if (alive) error = err; }
+        } catch (err) { if (alive && !err.householdCancelled) error = err; }
         finally { invitePending = false; if (alive) { await refresh(); render(); } }
     }
     async function discardInvitation(operation) {
@@ -157,6 +165,7 @@ export async function mount(view, ctx) {
         if (!alive || choice !== "discard") return;
         try {
             await bridge.call("discard_invite_account", { operation_id: operation.operation_id });
+            household.reset();
             invitePreview = null;
             inviteChoice = false;
             await refresh();
@@ -176,7 +185,7 @@ export async function mount(view, ctx) {
                 section.append(button("accounts-invite-open", { labelKey: "accounts.invite.open", variant: "primary", disabled: invitePending, onClick: startInvitation }), button("accounts-invite-discard-preview", { labelKey: "accounts.invite.discard", variant: "ghost", disabled: invitePending, onClick: () => discardInvitation(invitePreview) }));
             } else {
                 section.append(c.select.create({ id: "accounts-invite-source", labelKey: "accounts.invite.source", value: inviteSource, options: [{ value: "", label: t("accounts.invite.choose_source") }, ...accounts.map(account => ({ value: account.id, label: account.label }))], onChange: value => { inviteSource = value; render("accounts-invite-source"); } }));
-                section.append(button("accounts-invite-preview", { labelKey: "accounts.invite.preview", disabled: invitePending || !inviteSource, onClick: () => previewInvitation() }), button("accounts-invite-normal", { labelKey: "accounts.invite.normal", variant: "ghost", disabled: invitePending, onClick: () => { inviteChoice = false; addAccount(false, true); } }), button("accounts-invite-cancel-choice", { labelKey: "common.action.cancel", variant: "ghost", onClick: () => { inviteChoice = false; render(); } }));
+                section.append(button("accounts-invite-preview", { labelKey: "accounts.invite.preview", disabled: invitePending || !inviteSource, onClick: () => previewInvitation() }), button("accounts-invite-normal", { labelKey: "accounts.invite.normal", variant: "ghost", disabled: invitePending, onClick: () => { inviteChoice = false; addAccount(false, true); } }), button("accounts-invite-cancel-choice", { labelKey: "common.action.cancel", variant: "ghost", onClick: () => { household.reset(); inviteChoice = false; render(); } }));
             }
             nodes.push(section);
         }
@@ -256,6 +265,10 @@ export async function mount(view, ctx) {
         more.querySelector("summary").id = `accounts-more-toggle-${id}`;
         const row = c.accountRow.create({ account, actions: [actions[0], more] });
         if (!Number.isFinite(account.balance)) row.querySelector(".account-row-balance")?.remove();
+        if (account.invited_by) {
+            const source = accounts.find(item => item.id.toLowerCase() === account.invited_by.toLowerCase());
+            row.querySelector(".account-row-copy")?.append(el("p", { class: "accounts-invited-by", "data-invited-by": account.invited_by, text: t(account.invited_by_removed ? "accounts.invited_by.removed" : "accounts.invited_by.label", { account: account.invited_by_removed ? account.invited_by : source?.label || account.invited_by }) }));
+        }
         const entry = el("div", { class: "accounts-entry" }, row);
         if (Object.hasOwn(account, "identity_status")) {
             const identity = ["confirmed", "unconfirmed"].includes(account.identity_status) ? account.identity_status : "unknown";
@@ -296,5 +309,5 @@ export async function mount(view, ctx) {
     flow.seed();
     const activeId = store.get("overview")?.signin_active?.account_id;
     if (activeId && !flow.status) await flow.restore(activeId);
-    return { update() { render(); }, unmount() { alive = false; flow.dispose(); invited.dispose(); c.dispose(root); } };
+    return { update() { render(); }, unmount() { alive = false; household.reset(); flow.dispose(); invited.dispose(); c.dispose(root); } };
 }

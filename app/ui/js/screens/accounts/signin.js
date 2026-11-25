@@ -9,7 +9,7 @@ export const statusKeys = {
 };
 
 // Both owned screens follow the same backend state, without polling or opening a URL.
-export function signinFlow(ctx, { accepts = () => true, changed, connected, awaiting }) {
+export function signinFlow(ctx, { accepts = () => true, changed, connected, awaiting, ended, call = (method, request) => ctx.bridge.call(method, request) }) {
     let alive = true;
     let target = null;
     let revision = 0;
@@ -25,6 +25,7 @@ export function signinFlow(ctx, { accepts = () => true, changed, connected, awai
         flow.error = null;
         if (!activeStates.has(status.state)) flow.cancelling = false;
         notify();
+        if (["signed_in", "failed", "timed_out", "cancelled", "busy", "invite_interrupted"].includes(status.state)) ended?.(status);
         if (status.state === "signed_in" && (previous?.state !== "signed_in" || previous?.account_id !== status.account_id)) connected?.(status);
         if (status.state === "awaiting_confirmation" && (previous?.state !== status.state || previous?.account_id !== status.account_id)) awaiting?.(status);
     }
@@ -46,10 +47,10 @@ export function signinFlow(ctx, { accepts = () => true, changed, connected, awai
         const token = revision;
         notify();
         try {
-            const result = await ctx.bridge.call(method, request);
+            const result = await call(method, request);
             if (alive && token === revision) receive(result.signin, true);
             return result;
-        } catch (error) { if (alive) { flow.error = error; notify(); } throw error; }
+        } catch (error) { if (alive && !error.householdCancelled) { flow.error = error; notify(); } throw error; }
         finally { flow.pending = false; notify(); }
     };
     flow.cancel = async () => {
