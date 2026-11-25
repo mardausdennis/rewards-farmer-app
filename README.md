@@ -13,7 +13,7 @@ Underneath it runs [User0332/rewards-farmer](https://github.com/User0332/rewards
 
 You need Windows 10 or 11 (64-bit) and Microsoft Edge
 
-1. Download `RewardsFarmer-0.3.10-windows-x64-Setup.exe` from the [latest release](https://github.com/mardausdennis/rewards-farmer-app/releases/latest)
+1. Download `RewardsFarmer-0.3.11-windows-x64-Setup.exe` from the [latest release](https://github.com/mardausdennis/rewards-farmer-app/releases/latest)
 2. Run it. It installs for your Windows user only, no admin rights needed. The file isnt signed, so Windows may say "Windows protected your PC". Click **More info**, then **Run anyway**
 3. Open **Rewards Farmer** from the Start menu and go through the three steps: sign in, pick a schedule, done
 
@@ -31,7 +31,7 @@ The app uses the Microsoft account your Windows user is signed in with. If Windo
 No. Windows starts the checks on its own, the PC only has to be on and you signed in. The tray icon is just for status and notifications
 
 **Can it run more than one account?**
-Not yet. The app handles one account, the one your Windows user is signed in with
+Yes, one for each person in your household who has their own Microsoft account. Microsoft allows one Rewards account per person and six per household, so dont add a second account of your own
 
 **How do I remove it?**
 In Windows Settings under Apps, find Rewards Farmer and choose Uninstall. That removes its schedule too. Your data in `%LOCALAPPDATA%\RewardsFarmer` stays, delete that folder as well if you want everything gone
