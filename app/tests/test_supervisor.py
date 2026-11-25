@@ -788,7 +788,43 @@ class IsolationBoundTests(unittest.TestCase):
 				"returncode": proc.returncode, "readers_ended": True, "os_exit_proven": True}), flush=True)
 
 	def run_child(self, code, *, no_progress_timeout=1, total_timeout=4):
-		return _run_isolation_child([sys.executable, "-c", code], no_progress_timeout=no_progress_timeout, total_timeout=total_timeout)
+		# Job 2199 (2026-11-25) timed out before the first child line at 1 s.
+		# Start this synthetic interpreter separately, then release its scenario
+		# only when the unmodified helper starts timing it. The 30 s readiness
+		# bound diagnoses fixture startup, not lack of scenario test progress.
+		ready_line = "ISOLATION_FIXTURE_READY\n"
+		bootstrap = "import sys\nprint('ISOLATION_FIXTURE_READY',file=sys.stderr,flush=True)\nsys.stdin.read(1)\n"
+		command = [sys.executable, "-c", bootstrap + code]
+		proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+			text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+		ready, lines = threading.Event(), []
+		def read_ready():
+			try:
+				lines.append(proc.stderr.readline())
+			finally:
+				ready.set()
+		reader = threading.Thread(target=read_ready, name=f"farmer-isolation-{proc.pid}-startup")
+		reader.start()
+		try:
+			self.assertTrue(ready.wait(30), "Synthetic isolation child did not become ready within 30 s")
+			self.assertEqual(lines, [ready_line], "Synthetic isolation child exited before its scenario")
+			reader.join()
+			def release(*args, **kwargs):
+				proc.stdin.write("1")
+				proc.stdin.flush()
+				proc.stdin.close()
+				return proc
+			with mock.patch.object(subprocess, "Popen", side_effect=release) as existing:
+				result = _run_isolation_child(command, no_progress_timeout=no_progress_timeout, total_timeout=total_timeout)
+				existing.assert_called_once()
+				return result
+		finally:
+			if proc.poll() is None:
+				proc.kill()
+			proc.wait()
+			reader.join()
+			for stream in (proc.stdin, proc.stdout, proc.stderr):
+				stream.close()
 
 	def test_progress_can_outlive_the_old_scaled_total_bound(self):
 		code = """
